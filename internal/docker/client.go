@@ -47,11 +47,61 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// Client wraps the Docker Engine API client and provides the container
-// lifecycle operations that Updock needs.
+// DockerClient defines the interface for all Docker operations that Updock needs.
+// This interface enables mock-based testing of all components that interact
+// with the Docker daemon (updater, API server, scheduler) without requiring
+// a live Docker daemon.
+type DockerClient interface {
+	// Ping verifies connectivity to the Docker daemon.
+	Ping(ctx context.Context) error
+
+	// ListContainers returns containers matching the specified criteria.
+	ListContainers(ctx context.Context, includeStopped, includeRestarting bool) ([]ContainerInfo, error)
+
+	// InspectContainer returns detailed information about a container.
+	InspectContainer(ctx context.Context, id string) (*ContainerInfo, error)
+
+	// PullImage pulls an image and returns the new image ID.
+	PullImage(ctx context.Context, ref string, registryAuth string) (string, error)
+
+	// GetImageDigest returns the repository digest of a local image.
+	GetImageDigest(ctx context.Context, imageID string) (string, error)
+
+	// StopContainer stops a running container with optional custom signal.
+	StopContainer(ctx context.Context, id string, timeout time.Duration, customSignal string) error
+
+	// StartContainer starts a stopped container.
+	StartContainer(ctx context.Context, id string) error
+
+	// RemoveContainer forcefully removes a container.
+	RemoveContainer(ctx context.Context, id string, removeVolumes bool) error
+
+	// RemoveImage removes an image by ID or reference.
+	RemoveImage(ctx context.Context, imageID string) error
+
+	// ExecCommand executes a command inside a running container.
+	ExecCommand(ctx context.Context, containerID string, cmd string, timeout time.Duration) (string, error)
+
+	// RecreateContainer performs a safe container recreation with rollback.
+	RecreateContainer(ctx context.Context, id string, newImage string, stopTimeout time.Duration, customSignal string, removeVolumes bool) (string, error)
+
+	// GetDependencies returns container names this container depends on.
+	GetDependencies(ctx context.Context, containerID string) ([]string, error)
+
+	// Close releases resources held by the client.
+	Close() error
+
+	// WaitForHealthy waits for a container to become healthy.
+	WaitForHealthy(ctx context.Context, containerID string, timeout time.Duration) error
+}
+
+// Client wraps the Docker Engine API client and implements the [DockerClient] interface.
 type Client struct {
 	api dockerclient.APIClient
 }
+
+// Compile-time check that Client implements DockerClient.
+var _ DockerClient = (*Client)(nil)
 
 // ContainerInfo holds the metadata Updock needs about a running container.
 // It is a flattened, serializable view of the Docker container state.

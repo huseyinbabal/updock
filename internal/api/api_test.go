@@ -3,17 +3,24 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+
 	"github.com/huseyinbabal/updock/internal/audit"
 	"github.com/huseyinbabal/updock/internal/config"
+	"github.com/huseyinbabal/updock/internal/docker"
+	"github.com/huseyinbabal/updock/internal/mocks"
 	"github.com/huseyinbabal/updock/internal/policy"
 	"github.com/huseyinbabal/updock/internal/updater"
 )
 
-func newTestServer(token string) *Server {
+func newTestServer(t *testing.T, token string) (*Server, *mocks.MockDockerClient) {
+	mockDocker := mocks.NewMockDockerClient(t)
 	cfg := &config.Config{
 		HTTPAddr:       ":0",
 		HTTPEnabled:    true,
@@ -21,14 +28,12 @@ func newTestServer(token string) *Server {
 		MetricsEnabled: true,
 		MonitorAll:     true,
 	}
-	upd := updater.New(nil, nil, nil, cfg, policy.DefaultSpec(), audit.NewLog(""))
-	// Note: docker client is nil, so handlers that call Docker will fail.
-	// We test auth/routing/info/history which don't need Docker.
-	return NewServer(nil, upd, cfg)
+	upd := updater.New(mockDocker, nil, nil, cfg, policy.DefaultSpec(), audit.NewLog(""))
+	return NewServer(mockDocker, upd, cfg), mockDocker
 }
 
 func TestWithAuth_NoToken(t *testing.T) {
-	s := newTestServer("")
+	s, _ := newTestServer(t, "")
 	handler := s.withAuth(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
@@ -43,7 +48,7 @@ func TestWithAuth_NoToken(t *testing.T) {
 }
 
 func TestWithAuth_ValidBearerToken(t *testing.T) {
-	s := newTestServer("secret123")
+	s, _ := newTestServer(t, "secret123")
 	handler := s.withAuth(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
@@ -59,7 +64,7 @@ func TestWithAuth_ValidBearerToken(t *testing.T) {
 }
 
 func TestWithAuth_InvalidBearerToken(t *testing.T) {
-	s := newTestServer("secret123")
+	s, _ := newTestServer(t, "secret123")
 	handler := s.withAuth(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
@@ -75,7 +80,7 @@ func TestWithAuth_InvalidBearerToken(t *testing.T) {
 }
 
 func TestWithAuth_QueryParam(t *testing.T) {
-	s := newTestServer("secret123")
+	s, _ := newTestServer(t, "secret123")
 	handler := s.withAuth(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
@@ -90,7 +95,7 @@ func TestWithAuth_QueryParam(t *testing.T) {
 }
 
 func TestWithAuth_MissingToken(t *testing.T) {
-	s := newTestServer("secret123")
+	s, _ := newTestServer(t, "secret123")
 	handler := s.withAuth(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
@@ -105,7 +110,7 @@ func TestWithAuth_MissingToken(t *testing.T) {
 }
 
 func TestWithAuth_InvalidAuthHeaderFormat(t *testing.T) {
-	s := newTestServer("secret123")
+	s, _ := newTestServer(t, "secret123")
 	handler := s.withAuth(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
@@ -121,7 +126,7 @@ func TestWithAuth_InvalidAuthHeaderFormat(t *testing.T) {
 }
 
 func TestCorsMiddleware(t *testing.T) {
-	s := newTestServer("")
+	s, _ := newTestServer(t, "")
 	handler := s.corsMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -180,7 +185,7 @@ func TestWriteError(t *testing.T) {
 }
 
 func TestHandleInfo(t *testing.T) {
-	s := newTestServer("")
+	s, _ := newTestServer(t, "")
 
 	req := httptest.NewRequest("GET", "/api/info", nil)
 	w := httptest.NewRecorder()
@@ -200,7 +205,7 @@ func TestHandleInfo(t *testing.T) {
 }
 
 func TestHandleHistory(t *testing.T) {
-	s := newTestServer("")
+	s, _ := newTestServer(t, "")
 
 	req := httptest.NewRequest("GET", "/api/history", nil)
 	w := httptest.NewRecorder()
@@ -212,7 +217,7 @@ func TestHandleHistory(t *testing.T) {
 }
 
 func TestHandleAuditLog(t *testing.T) {
-	s := newTestServer("")
+	s, _ := newTestServer(t, "")
 
 	req := httptest.NewRequest("GET", "/api/audit", nil)
 	w := httptest.NewRecorder()
@@ -224,7 +229,7 @@ func TestHandleAuditLog(t *testing.T) {
 }
 
 func TestHandleAuditLog_WithParams(t *testing.T) {
-	s := newTestServer("")
+	s, _ := newTestServer(t, "")
 
 	req := httptest.NewRequest("GET", "/api/audit?container=nginx&limit=5", nil)
 	w := httptest.NewRecorder()
@@ -236,7 +241,7 @@ func TestHandleAuditLog_WithParams(t *testing.T) {
 }
 
 func TestHandleAuditLog_InvalidLimit(t *testing.T) {
-	s := newTestServer("")
+	s, _ := newTestServer(t, "")
 
 	req := httptest.NewRequest("GET", "/api/audit?limit=abc", nil)
 	w := httptest.NewRecorder()
@@ -248,7 +253,7 @@ func TestHandleAuditLog_InvalidLimit(t *testing.T) {
 }
 
 func TestHandleUI_Root(t *testing.T) {
-	s := newTestServer("")
+	s, _ := newTestServer(t, "")
 
 	req := httptest.NewRequest("GET", "/", nil)
 	w := httptest.NewRecorder()
@@ -263,7 +268,7 @@ func TestHandleUI_Root(t *testing.T) {
 }
 
 func TestHandleUI_NotRoot(t *testing.T) {
-	s := newTestServer("")
+	s, _ := newTestServer(t, "")
 
 	req := httptest.NewRequest("GET", "/other", nil)
 	w := httptest.NewRecorder()
@@ -275,7 +280,7 @@ func TestHandleUI_NotRoot(t *testing.T) {
 }
 
 func TestHandleContainerDetail_MissingID(t *testing.T) {
-	s := newTestServer("")
+	s, _ := newTestServer(t, "")
 
 	req := httptest.NewRequest("GET", "/api/containers/", nil)
 	// PathValue returns "" for missing path param
@@ -288,10 +293,122 @@ func TestHandleContainerDetail_MissingID(t *testing.T) {
 }
 
 func TestStop_NilServer(t *testing.T) {
-	s := newTestServer("")
+	s, _ := newTestServer(t, "")
 	// server.server is nil before Start()
 	err := s.Stop(context.Background())
 	if err != nil {
 		t.Errorf("expected nil error for nil server, got %v", err)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// New mock-based tests
+// ---------------------------------------------------------------------------
+
+func TestHandleContainers_Success(t *testing.T) {
+	s, mockDocker := newTestServer(t, "")
+
+	containers := []docker.ContainerInfo{
+		{
+			ID:      "aabbccddee112233",
+			Name:    "nginx",
+			Image:   "nginx:latest",
+			ImageID: "sha256:abc123",
+			State:   "running",
+			Labels:  map[string]string{},
+		},
+		{
+			ID:      "ffeeddccbb998877",
+			Name:    "redis",
+			Image:   "redis:7",
+			ImageID: "sha256:def456",
+			State:   "running",
+			Labels:  map[string]string{},
+		},
+	}
+
+	mockDocker.EXPECT().ListContainers(mock.Anything, false, false).Return(containers, nil)
+
+	req := httptest.NewRequest("GET", "/api/containers", nil)
+	w := httptest.NewRecorder()
+	s.handleContainers(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var result []docker.ContainerInfo
+	err := json.Unmarshal(w.Body.Bytes(), &result)
+	assert.NoError(t, err)
+	assert.Len(t, result, 2)
+	assert.Equal(t, "nginx", result[0].Name)
+	assert.Equal(t, "redis", result[1].Name)
+}
+
+func TestHandleContainers_Error(t *testing.T) {
+	s, mockDocker := newTestServer(t, "")
+
+	mockDocker.EXPECT().ListContainers(mock.Anything, false, false).Return(nil, errors.New("docker daemon unreachable"))
+
+	req := httptest.NewRequest("GET", "/api/containers", nil)
+	w := httptest.NewRecorder()
+	s.handleContainers(w, req)
+
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+
+	var result map[string]string
+	err := json.Unmarshal(w.Body.Bytes(), &result)
+	assert.NoError(t, err)
+	assert.Equal(t, "docker daemon unreachable", result["error"])
+}
+
+func TestHandleHealth_Healthy(t *testing.T) {
+	s, mockDocker := newTestServer(t, "")
+
+	mockDocker.EXPECT().Ping(mock.Anything).Return(nil)
+
+	req := httptest.NewRequest("GET", "/api/health", nil)
+	w := httptest.NewRecorder()
+	s.handleHealth(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var result map[string]string
+	err := json.Unmarshal(w.Body.Bytes(), &result)
+	assert.NoError(t, err)
+	assert.Equal(t, "healthy", result["status"])
+}
+
+func TestHandleHealth_Unhealthy(t *testing.T) {
+	s, mockDocker := newTestServer(t, "")
+
+	mockDocker.EXPECT().Ping(mock.Anything).Return(errors.New("connection refused"))
+
+	req := httptest.NewRequest("GET", "/api/health", nil)
+	w := httptest.NewRecorder()
+	s.handleHealth(w, req)
+
+	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+
+	var result map[string]string
+	err := json.Unmarshal(w.Body.Bytes(), &result)
+	assert.NoError(t, err)
+	assert.Equal(t, "unhealthy", result["status"])
+	assert.Equal(t, "connection refused", result["error"])
+}
+
+func TestHandleTriggerUpdate(t *testing.T) {
+	s, mockDocker := newTestServer(t, "")
+
+	// Return empty container list so no update logic runs
+	mockDocker.EXPECT().ListContainers(mock.Anything, false, false).Return([]docker.ContainerInfo{}, nil)
+
+	req := httptest.NewRequest("POST", "/api/update", nil)
+	w := httptest.NewRecorder()
+	s.handleTriggerUpdate(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var result map[string]interface{}
+	err := json.Unmarshal(w.Body.Bytes(), &result)
+	assert.NoError(t, err)
+	assert.Equal(t, "Update check completed", result["message"])
 }

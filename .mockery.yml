@@ -1,0 +1,8 @@
+packages:
+  github.com/huseyinbabal/updock/internal/docker:
+    interfaces:
+      DockerClient:
+        config:
+          dir: "internal/mocks"
+          filename: "mock_docker_client.go"
+          inpackage: false

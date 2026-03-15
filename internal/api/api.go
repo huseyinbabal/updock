@@ -51,7 +51,7 @@ import (
 // It provides endpoints for container management, update triggering,
 // and real-time status monitoring.
 type Server struct {
-	docker  *docker.Client
+	docker  docker.DockerClient
 	updater *updater.Updater
 	cfg     *config.Config
 	mux     *http.ServeMux
@@ -60,7 +60,7 @@ type Server struct {
 
 // NewServer creates a new API server with all routes configured.
 // The server is not started until [Server.Start] is called.
-func NewServer(dockerClient *docker.Client, upd *updater.Updater, cfg *config.Config) *Server {
+func NewServer(dockerClient docker.DockerClient, upd *updater.Updater, cfg *config.Config) *Server {
 	s := &Server{
 		docker:  dockerClient,
 		updater: upd,
