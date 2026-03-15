@@ -73,7 +73,7 @@ groups:
 `
 	dir := t.TempDir()
 	path := filepath.Join(dir, "updock.yml")
-	os.WriteFile(path, []byte(content), 0644)
+	_ = os.WriteFile(path, []byte(content), 0644)
 
 	spec, err := LoadSpec(path)
 	if err != nil {
@@ -112,7 +112,7 @@ groups:
 func TestLoadSpec_InvalidYAML(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "bad.yml")
-	os.WriteFile(path, []byte(":::invalid:::yaml"), 0644)
+	_ = os.WriteFile(path, []byte(":::invalid:::yaml"), 0644)
 
 	_, err := LoadSpec(path)
 	if err == nil {
@@ -128,7 +128,7 @@ policies:
 `
 	dir := t.TempDir()
 	path := filepath.Join(dir, "updock.yml")
-	os.WriteFile(path, []byte(content), 0644)
+	_ = os.WriteFile(path, []byte(content), 0644)
 
 	_, err := LoadSpec(path)
 	if err == nil {

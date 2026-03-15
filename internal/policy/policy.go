@@ -273,8 +273,8 @@ func isInWindow(window string, now time.Time) bool {
 
 func parseHM(h, m string) (int, int) {
 	hh, mh := 0, 0
-	fmt.Sscanf(h, "%d", &hh)
-	fmt.Sscanf(m, "%d", &mh)
+	_, _ = fmt.Sscanf(h, "%d", &hh)
+	_, _ = fmt.Sscanf(m, "%d", &mh)
 	return hh, mh
 }
 

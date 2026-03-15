@@ -170,7 +170,7 @@ func TestPersistence(t *testing.T) {
 func TestLoad_InvalidJSON(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "bad.json")
-	os.WriteFile(path, []byte("not json"), 0644)
+	_ = os.WriteFile(path, []byte("not json"), 0644)
 
 	l := NewLog(path)
 	if len(l.entries) != 0 {
@@ -181,7 +181,7 @@ func TestLoad_InvalidJSON(t *testing.T) {
 func TestLoad_EmptyFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "empty.json")
-	os.WriteFile(path, []byte(""), 0644)
+	_ = os.WriteFile(path, []byte(""), 0644)
 
 	l := NewLog(path)
 	if len(l.entries) != 0 {

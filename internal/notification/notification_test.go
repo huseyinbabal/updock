@@ -119,7 +119,7 @@ func TestNotifyError(t *testing.T) {
 		received.Add(1)
 		body, _ := io.ReadAll(r.Body)
 		var data map[string]interface{}
-		json.Unmarshal(body, &data)
+		_ = json.Unmarshal(body, &data)
 		if data["type"] != "error" {
 			t.Errorf("expected type 'error', got %v", data["type"])
 		}
@@ -147,7 +147,7 @@ func TestNotifyStartup(t *testing.T) {
 		received.Add(1)
 		body, _ := io.ReadAll(r.Body)
 		var data map[string]interface{}
-		json.Unmarshal(body, &data)
+		_ = json.Unmarshal(body, &data)
 		if data["type"] != "startup" {
 			t.Errorf("expected type 'startup', got %v", data["type"])
 		}

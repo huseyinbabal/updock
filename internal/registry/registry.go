@@ -181,7 +181,7 @@ func (c *Client) getToken(ctx context.Context, repo string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("requesting auth token: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("auth token request returned status %d", resp.StatusCode)
@@ -253,7 +253,7 @@ func (c *Client) GetRemoteDigest(ctx context.Context, imageRef string) (string, 
 	if err != nil {
 		return "", fmt.Errorf("checking remote manifest: %w", err)
 	}
-	defer func() { _, _ = io.Copy(io.Discard, resp.Body); resp.Body.Close() }()
+	defer func() { _, _ = io.Copy(io.Discard, resp.Body); _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("manifest request returned status %d for %s:%s", resp.StatusCode, repo, tag)

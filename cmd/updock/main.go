@@ -123,38 +123,43 @@ specific containers. When no names are given, all containers are monitored.`,
 	flags.String("audit-log", "/var/lib/updock/audit.json", "Path to audit log file")
 
 	// Bind all flags to viper for unified configuration
-	viper.BindPFlag("docker_host", flags.Lookup("docker-host"))
-	viper.BindPFlag("tls_verify", flags.Lookup("tls-verify"))
-	viper.BindPFlag("docker_config", flags.Lookup("docker-config"))
-	viper.BindPFlag("interval", flags.Lookup("interval"))
-	viper.BindPFlag("schedule", flags.Lookup("schedule"))
-	viper.BindPFlag("monitor_all", flags.Lookup("monitor-all"))
-	viper.BindPFlag("disable_containers", flags.Lookup("disable-containers"))
-	viper.BindPFlag("include_stopped", flags.Lookup("include-stopped"))
-	viper.BindPFlag("include_restarting", flags.Lookup("include-restarting"))
-	viper.BindPFlag("revive_stopped", flags.Lookup("revive-stopped"))
-	viper.BindPFlag("scope", flags.Lookup("scope"))
-	viper.BindPFlag("cleanup_images", flags.Lookup("cleanup"))
-	viper.BindPFlag("remove_volumes", flags.Lookup("remove-volumes"))
-	viper.BindPFlag("stop_timeout", flags.Lookup("stop-timeout"))
-	viper.BindPFlag("dry_run", flags.Lookup("dry-run"))
-	viper.BindPFlag("run_once", flags.Lookup("run-once"))
-	viper.BindPFlag("no_pull", flags.Lookup("no-pull"))
-	viper.BindPFlag("no_restart", flags.Lookup("no-restart"))
-	viper.BindPFlag("rolling_restart", flags.Lookup("rolling-restart"))
-	viper.BindPFlag("label_precedence", flags.Lookup("label-precedence"))
-	viper.BindPFlag("lifecycle_hooks", flags.Lookup("lifecycle-hooks"))
-	viper.BindPFlag("http_addr", flags.Lookup("http-addr"))
-	viper.BindPFlag("http_enabled", flags.Lookup("http-enabled"))
-	viper.BindPFlag("http_api_token", flags.Lookup("http-api-token"))
-	viper.BindPFlag("metrics_enabled", flags.Lookup("metrics"))
-	viper.BindPFlag("webhook_url", flags.Lookup("webhook-url"))
-	viper.BindPFlag("notification_template", flags.Lookup("notification-template"))
-	viper.BindPFlag("no_startup_message", flags.Lookup("no-startup-message"))
-	viper.BindPFlag("log_level", flags.Lookup("log-level"))
-	viper.BindPFlag("warn_on_head_failure", flags.Lookup("warn-on-head-failure"))
-	viper.BindPFlag("policy_file", flags.Lookup("policy-file"))
-	viper.BindPFlag("audit_log", flags.Lookup("audit-log"))
+	binds := map[string]string{
+		"docker_host":           "docker-host",
+		"tls_verify":            "tls-verify",
+		"docker_config":         "docker-config",
+		"interval":              "interval",
+		"schedule":              "schedule",
+		"monitor_all":           "monitor-all",
+		"disable_containers":    "disable-containers",
+		"include_stopped":       "include-stopped",
+		"include_restarting":    "include-restarting",
+		"revive_stopped":        "revive-stopped",
+		"scope":                 "scope",
+		"cleanup_images":        "cleanup",
+		"remove_volumes":        "remove-volumes",
+		"stop_timeout":          "stop-timeout",
+		"dry_run":               "dry-run",
+		"run_once":              "run-once",
+		"no_pull":               "no-pull",
+		"no_restart":            "no-restart",
+		"rolling_restart":       "rolling-restart",
+		"label_precedence":      "label-precedence",
+		"lifecycle_hooks":       "lifecycle-hooks",
+		"http_addr":             "http-addr",
+		"http_enabled":          "http-enabled",
+		"http_api_token":        "http-api-token",
+		"metrics_enabled":       "metrics",
+		"webhook_url":           "webhook-url",
+		"notification_template": "notification-template",
+		"no_startup_message":    "no-startup-message",
+		"log_level":             "log-level",
+		"warn_on_head_failure":  "warn-on-head-failure",
+		"policy_file":           "policy-file",
+		"audit_log":             "audit-log",
+	}
+	for viperKey, flagName := range binds {
+		_ = viper.BindPFlag(viperKey, flags.Lookup(flagName))
+	}
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
@@ -204,7 +209,7 @@ func run(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to create Docker client: %w", err)
 	}
-	defer dockerClient.Close()
+	defer func() { _ = dockerClient.Close() }()
 
 	// Verify Docker connection
 	if err := dockerClient.Ping(ctx); err != nil {
@@ -267,7 +272,7 @@ func run(cmd *cobra.Command, args []string) error {
 		defer func() {
 			shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), cfg.StopTimeout)
 			defer shutdownCancel()
-			server.Stop(shutdownCtx)
+			_ = server.Stop(shutdownCtx)
 		}()
 	}
 

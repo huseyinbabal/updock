@@ -58,7 +58,7 @@ func TestNewClient_Default(t *testing.T) {
 	if c == nil {
 		t.Fatal("expected non-nil client")
 	}
-	c.Close()
+	_ = c.Close()
 }
 
 func TestNewClient_CustomHost(t *testing.T) {
@@ -69,5 +69,5 @@ func TestNewClient_CustomHost(t *testing.T) {
 	if c == nil {
 		t.Fatal("expected non-nil client")
 	}
-	c.Close()
+	_ = c.Close()
 }

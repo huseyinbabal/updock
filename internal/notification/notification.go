@@ -180,7 +180,7 @@ func (n *Notifier) send(url string, data []byte) {
 		log.Warnf("Failed to send webhook notification to %s: %v", url, err)
 		return
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 400 {
 		log.Warnf("Webhook %s returned error status: %d", url, resp.StatusCode)

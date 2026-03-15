@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -158,7 +159,7 @@ func TestWriteJSON(t *testing.T) {
 		t.Error("expected application/json")
 	}
 	var result map[string]string
-	json.Unmarshal(w.Body.Bytes(), &result)
+	_ = json.Unmarshal(w.Body.Bytes(), &result)
 	if result["key"] != "value" {
 		t.Errorf("unexpected body: %s", w.Body.String())
 	}
@@ -172,7 +173,7 @@ func TestWriteError(t *testing.T) {
 		t.Errorf("expected 400, got %d", w.Code)
 	}
 	var result map[string]string
-	json.Unmarshal(w.Body.Bytes(), &result)
+	_ = json.Unmarshal(w.Body.Bytes(), &result)
 	if result["error"] != "something wrong" {
 		t.Errorf("unexpected error message: %s", w.Body.String())
 	}
@@ -189,7 +190,7 @@ func TestHandleInfo(t *testing.T) {
 		t.Errorf("expected 200, got %d", w.Code)
 	}
 	var result map[string]interface{}
-	json.Unmarshal(w.Body.Bytes(), &result)
+	_ = json.Unmarshal(w.Body.Bytes(), &result)
 	if _, ok := result["version"]; !ok {
 		t.Error("expected version in info response")
 	}
@@ -289,7 +290,7 @@ func TestHandleContainerDetail_MissingID(t *testing.T) {
 func TestStop_NilServer(t *testing.T) {
 	s := newTestServer("")
 	// server.server is nil before Start()
-	err := s.Stop(nil)
+	err := s.Stop(context.Background())
 	if err != nil {
 		t.Errorf("expected nil error for nil server, got %v", err)
 	}

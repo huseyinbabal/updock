@@ -89,7 +89,7 @@ func TestStop_ContextCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	s.startInterval(ctx)
+	_ = s.startInterval(ctx)
 	time.Sleep(20 * time.Millisecond)
 	// No panic = success
 }

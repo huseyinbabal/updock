@@ -247,7 +247,7 @@ func (c *Client) PullImage(ctx context.Context, ref string, registryAuth string)
 	if err != nil {
 		return "", fmt.Errorf("pulling image %s: %w", ref, err)
 	}
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 
 	// Consume the pull output stream, checking for errors
 	decoder := json.NewDecoder(reader)
@@ -265,7 +265,7 @@ func (c *Client) PullImage(ctx context.Context, ref string, registryAuth string)
 	}
 
 	// Retrieve the image ID of the newly pulled image
-	inspect, _, err := c.api.ImageInspectWithRaw(ctx, ref)
+	inspect, err := c.api.ImageInspect(ctx, ref)
 	if err != nil {
 		return "", fmt.Errorf("inspecting pulled image %s: %w", ref, err)
 	}
@@ -276,7 +276,7 @@ func (c *Client) PullImage(ctx context.Context, ref string, registryAuth string)
 // GetImageDigest returns the repository digest of a local image.
 // If no digest is available (e.g. locally built images), the image ID is returned.
 func (c *Client) GetImageDigest(ctx context.Context, imageID string) (string, error) {
-	inspect, _, err := c.api.ImageInspectWithRaw(ctx, imageID)
+	inspect, err := c.api.ImageInspect(ctx, imageID)
 	if err != nil {
 		return "", fmt.Errorf("inspecting image %s: %w", imageID, err)
 	}

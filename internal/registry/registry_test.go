@@ -120,7 +120,7 @@ func TestNewClient_WithConfig(t *testing.T) {
 		},
 	}
 	data, _ := json.Marshal(cfg)
-	os.WriteFile(path, data, 0644)
+	_ = os.WriteFile(path, data, 0644)
 
 	c := NewClient(path)
 	if len(c.authConfigs) != 2 {
@@ -143,7 +143,7 @@ func TestNewClient_WithConfig(t *testing.T) {
 func TestNewClient_InvalidConfig(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "bad.json")
-	os.WriteFile(path, []byte("not json"), 0644)
+	_ = os.WriteFile(path, []byte("not json"), 0644)
 
 	c := NewClient(path)
 	if c == nil {

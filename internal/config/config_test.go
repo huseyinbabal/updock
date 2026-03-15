@@ -21,7 +21,7 @@ func TestReadSecretFile_PlainValue(t *testing.T) {
 func TestReadSecretFile_FileReference(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "secret.txt")
-	os.WriteFile(path, []byte("  file-secret  \n"), 0644)
+	_ = os.WriteFile(path, []byte("  file-secret  \n"), 0644)
 
 	result := ReadSecretFile(path)
 	if result != "file-secret" {
@@ -49,7 +49,7 @@ func TestLoad_Defaults(t *testing.T) {
 		"UPDOCK_DOCKER_HOST", "UPDOCK_INTERVAL", "UPDOCK_MONITOR_ALL",
 		"UPDOCK_HTTP_ADDR", "UPDOCK_LOG_LEVEL", "UPDOCK_POLICY_FILE",
 	} {
-		os.Unsetenv(key)
+		_ = os.Unsetenv(key)
 	}
 
 	cfg := Load()
