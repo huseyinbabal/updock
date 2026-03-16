@@ -36,32 +36,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 10
 
       - uses: actions/setup-go@v5
         with:
           go-version: '1.26'
 
-      - uses: gwatts/go-coverage-action@v2
-        id: coverage
-        with:
-          coverage-threshold: 80
-          cover-pkg: ./...
-          ignore-pattern: |
-            \/mocks\/
-            \/docker\/client\.go$
+      - name: Run tests with coverage
+        run: go test ./internal/... -coverprofile=./cover.out -covermode=atomic -coverpkg=./...
 
-      - name: Update coverage badge
-        if: github.ref_name == 'main' && github.event_name == 'push'
-        uses: schneegans/dynamic-badges-action@v1.7.0
+      - name: Check coverage
+        uses: vladopajic/go-test-coverage@v2
         with:
-          auth: ${{ secrets.GIST_TOKEN }}
-          gistID: e1cdde41155f750c6d0e71f544df4f17
-          filename: updock-coverage.json
-          label: coverage
-          message: ${{ steps.coverage.outputs.coverage-pct-1dp }}%
-          color: ${{ steps.coverage.outputs.meets-threshold == 'true' && 'green' || 'red' }}
+          config: ./.testcoverage.yml
+          git-token: ${{ github.ref_name == 'main' && secrets.GITHUB_TOKEN || '' }}
+          git-branch: badges
 
   build:
     name: Build
