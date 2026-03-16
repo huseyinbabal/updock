@@ -135,7 +135,27 @@ const dashboardHTML = `<!DOCTYPE html>
 
     <script>
         const API = window.location.origin;
+        const TOKEN = new URLSearchParams(window.location.search).get('token') || localStorage.getItem('updock_token') || '';
+        if (TOKEN) localStorage.setItem('updock_token', TOKEN);
         let policiesData = null;
+
+        function authHeaders() {
+            const h = {};
+            if (TOKEN) h['Authorization'] = 'Bearer ' + TOKEN;
+            return h;
+        }
+        function apiFetch(path, opts) {
+            opts = opts || {};
+            opts.headers = Object.assign(authHeaders(), opts.headers || {});
+            return fetch(API + path, opts).then(r => {
+                if (r.status === 401) {
+                    const t = prompt('API token required:');
+                    if (t) { localStorage.setItem('updock_token', t); location.reload(); }
+                    throw new Error('Unauthorized');
+                }
+                return r;
+            });
+        }
 
         function switchTab(tab) {
             document.querySelectorAll('.tab').forEach((t,i) => { t.classList.remove('active'); if(t.textContent.toLowerCase().replace(/ /g,'').includes(tab)) t.classList.add('active'); });
@@ -166,7 +186,7 @@ const dashboardHTML = `<!DOCTYPE html>
 
         async function loadContainers() {
             try {
-                const [cr, pr] = await Promise.all([fetch(API+'/api/containers'), fetch(API+'/api/policies')]);
+                const [cr, pr] = await Promise.all([apiFetch('/api/containers'), apiFetch('/api/policies')]);
                 const containers = await cr.json();
                 policiesData = await pr.json();
                 document.getElementById('stat-containers').textContent = containers.length||0;
@@ -183,7 +203,7 @@ const dashboardHTML = `<!DOCTYPE html>
 
         async function loadAudit() {
             try {
-                const r = await fetch(API+'/api/audit?limit=100');
+                const r = await apiFetch('/api/audit?limit=100');
                 const entries = await r.json();
                 let pending=0;
                 if(entries) entries.forEach(e=>{ if(e.type==='approval.pending')pending++; });
@@ -196,7 +216,7 @@ const dashboardHTML = `<!DOCTYPE html>
 
         async function loadPolicies() {
             try {
-                const r = await fetch(API+'/api/policies');
+                const r = await apiFetch('/api/policies');
                 const data = await r.json();
                 policiesData = data;
                 const policies = data.Policies||data.policies||{};
@@ -219,7 +239,7 @@ const dashboardHTML = `<!DOCTYPE html>
 
         async function loadHistory() {
             try {
-                const r = await fetch(API+'/api/history');
+                const r = await apiFetch('/api/history');
                 const history = await r.json();
                 let updates=0, errors=0;
                 if(history) history.forEach(h=>{ if(h.updated)updates++; if(h.error)errors++; });
@@ -234,7 +254,7 @@ const dashboardHTML = `<!DOCTYPE html>
 
         async function loadHealth() {
             try {
-                const r = await fetch(API+'/api/health');
+                const r = await apiFetch('/api/health');
                 const d = await r.json();
                 const b = document.getElementById('health-badge');
                 b.className = 'badge badge-'+(d.status==='healthy'?'healthy':'unhealthy');
@@ -243,13 +263,13 @@ const dashboardHTML = `<!DOCTYPE html>
         }
 
         async function loadInfo() {
-            try { const r=await fetch(API+'/api/info'); const d=await r.json(); document.getElementById('version-badge').textContent='v'+(d.version||'-'); } catch(e){}
+            try { const r=await apiFetch('/api/info'); const d=await r.json(); document.getElementById('version-badge').textContent='v'+(d.version||'-'); } catch(e){}
         }
 
         async function triggerUpdate() {
             const btn=document.getElementById('update-btn'); btn.disabled=true; btn.innerHTML='<span class="spinner"></span> Checking...';
             try {
-                const r=await fetch(API+'/api/update',{method:'POST'}); const d=await r.json();
+                const r=await apiFetch('/api/update',{method:'POST'}); const d=await r.json();
                 if(d.results){const u=d.results.filter(r=>r.updated).length; showToast(d.results.length+' checked, '+u+' updated','success');}
                 else showToast('Check completed','success');
                 loadContainers(); loadHistory(); loadAudit();
