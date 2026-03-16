@@ -7,7 +7,7 @@ on:
     branches: [main]
 
 permissions:
-  contents: write
+  contents: read
   pull-requests: write
 
 jobs:
@@ -37,91 +37,88 @@ jobs:
         with:
           go-version: '1.26'
 
+      - name: Install gcov2lcov
+        run: go install github.com/jandelgado/gcov2lcov@latest
+
       - name: Run tests with coverage
         run: |
           go test -race -coverprofile=coverage.out -covermode=atomic \
             $(go list ./internal/... | grep -v /mocks)
 
-      - name: Generate coverage report
-        id: coverage
+      - name: Check coverage threshold
         run: |
-          # Filtered coverage (excluding mocks & docker daemon)
           grep -v '/mocks/' coverage.out | grep -v 'internal/docker/client.go' > coverage-filtered.out
           COVERAGE=$(go tool cover -func=coverage-filtered.out | grep ^total | awk '{print $3}' | tr -d '%')
-          echo "coverage=${COVERAGE}" >> "$GITHUB_OUTPUT"
           echo "Coverage (excluding mocks & docker daemon): ${COVERAGE}%"
-
-          # Total coverage
-          TOTAL=$(go tool cover -func=coverage.out | grep ^total | awk '{print $3}' | tr -d '%')
-          echo "total=${TOTAL}" >> "$GITHUB_OUTPUT"
-
-          # Threshold check
           THRESHOLD=80
           if [ "$(echo "$COVERAGE < $THRESHOLD" | bc -l)" -eq 1 ]; then
             echo "::error::Coverage ${COVERAGE}% is below threshold ${THRESHOLD}%"
             exit 1
           fi
 
+      - name: Convert coverage to LCOV
+        run: gcov2lcov -infile coverage.out -outfile lcov.info
+
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v4
         with:
-          name: coverage
-          path: coverage.out
+          name: lcov
+          path: lcov.info
 
-      - name: Update coverage badge
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-        uses: schneegans/dynamic-badges-action@v1.7.0
+  base-coverage:
+    name: Base Coverage
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
         with:
-          auth: ${{ secrets.GIST_TOKEN }}
-          gistID: ${{ vars.COVERAGE_GIST_ID }}
-          filename: updock-coverage.json
-          label: coverage
-          message: ${{ steps.coverage.outputs.coverage }}%
-          valColorRange: ${{ steps.coverage.outputs.coverage }}
-          minColorRange: 50
-          maxColorRange: 90
+          ref: ${{ github.base_ref }}
 
-      - name: Comment coverage on PR
-        if: github.event_name == 'pull_request'
-        uses: actions/github-script@v7
+      - uses: actions/setup-go@v5
         with:
-          script: |
-            const coverage = '${{ steps.coverage.outputs.coverage }}';
-            const total = '${{ steps.coverage.outputs.total }}';
+          go-version: '1.26'
 
-            const body = `## Coverage Report
+      - name: Install gcov2lcov
+        run: go install github.com/jandelgado/gcov2lcov@latest
 
-            | Metric | Value |
-            |--------|-------|
-            | **Filtered coverage** (excl. mocks & docker daemon) | \`${coverage}%\` |
-            | **Total coverage** | \`${total}%\` |
-            | **Threshold** | \`80%\` |
+      - name: Run base branch tests with coverage
+        run: |
+          go test -coverprofile=coverage.out -covermode=atomic \
+            $(go list ./internal/... | grep -v /mocks) || true
 
-            > Filtered coverage excludes generated mocks and Docker daemon I/O code that requires a live Docker socket.`;
+      - name: Convert to LCOV
+        run: gcov2lcov -infile coverage.out -outfile base-lcov.info || true
 
-            // Find existing coverage comment
-            const { data: comments } = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-            });
-            const existing = comments.find(c => c.body.includes('## Coverage Report'));
+      - name: Upload base coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: base-lcov
+          path: base-lcov.info
 
-            if (existing) {
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: existing.id,
-                body,
-              });
-            } else {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                body,
-              });
-            }
+  coverage-report:
+    name: Coverage Report
+    if: github.event_name == 'pull_request'
+    needs: [test, base-coverage]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: lcov
+          path: .
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: base-lcov
+          path: .
+
+      - name: Barecheck coverage report
+        uses: barecheck/code-coverage-action@v1
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          lcov-file: ./lcov.info
+          base-lcov-file: ./base-lcov.info
+          send-summary-comment: true
+          show-annotations: warning
 
   build:
     name: Build
