@@ -5,7 +5,6 @@
 <h1 align="center">Updock</h1>
 
 <p align="center">
-  <a href="https://github.com/huseyinbabal/updock/actions/workflows/ci.yml"><img src="https://github.com/huseyinbabal/updock/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://github.com/huseyinbabal/updock/actions/workflows/ci.yml"><img src="https://raw.githubusercontent.com/huseyinbabal/updock/badges/.badges/main/coverage.svg" alt="coverage"></a>
 </p>
 
