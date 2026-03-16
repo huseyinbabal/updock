@@ -44,6 +44,17 @@ nav:
     - Registry Authentication: private-registries.md
     - Fleet & Multi-Instance: multiple-instances.md
     - Notifications & Webhooks: notifications.md
+  - Examples:
+    - Homelab Media Server: examples/homelab-media.md
+    - Web App with Database: examples/webapp-database.md
+    - CI/CD One-Shot Check: examples/ci-cd-check.md
+    - Multi-Environment Fleet: examples/multi-env.md
+    - Zero-Downtime Rolling Update: examples/zero-downtime.md
+    - Private Registry (ECR/GCR): examples/private-registry.md
+    - Monitoring Stack: examples/monitoring-stack.md
+    - IoT Edge Devices: examples/iot-edge.md
+    - WordPress + Plugins: examples/wordpress.md
+    - Microservices with Dependencies: examples/microservices.md
   - Reference:
     - CLI & Environment: arguments.md
 
