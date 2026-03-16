@@ -1,5 +1,8 @@
 # Updock
 
+[![CI](https://github.com/huseyinbabal/updock/actions/workflows/ci.yml/badge.svg)](https://github.com/huseyinbabal/updock/actions/workflows/ci.yml)
+[![Coverage](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/huseyinbabal/COVERAGE_GIST_ID/raw/updock-coverage.json)](https://github.com/huseyinbabal/updock/actions/workflows/ci.yml)
+
 Declarative container update platform with policy engine, audit trail, and web dashboard.
 
 ## Quick Start
