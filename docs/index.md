@@ -1,5 +1,10 @@
 # Updock
 
+![GitHub Release](https://img.shields.io/github/v/release/huseyinbabal/updock?style=flat-square)
+![GitHub Stars](https://img.shields.io/github/stars/huseyinbabal/updock?style=flat-square)
+![GitHub Forks](https://img.shields.io/github/forks/huseyinbabal/updock?style=flat-square)
+![GitHub License](https://img.shields.io/github/license/huseyinbabal/updock?style=flat-square)
+
 **Declarative container update platform with policy engine and Web UI.**
 
 Updock is not just another container auto-updater. It gives you full control
