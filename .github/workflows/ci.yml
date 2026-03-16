@@ -60,6 +60,23 @@ jobs:
             exit 1
           fi
 
+      - name: Update coverage badge
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        env:
+          GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
+        run: |
+          if [ -z "$GIST_TOKEN" ]; then echo "GIST_TOKEN not set, skipping badge update"; exit 0; fi
+          COVERAGE=${{ steps.coverage.outputs.coverage }}
+          COLOR="red"
+          if [ "$(echo "$COVERAGE >= 90" | bc -l)" -eq 1 ]; then COLOR="brightgreen"
+          elif [ "$(echo "$COVERAGE >= 80" | bc -l)" -eq 1 ]; then COLOR="green"
+          elif [ "$(echo "$COVERAGE >= 70" | bc -l)" -eq 1 ]; then COLOR="yellow"
+          elif [ "$(echo "$COVERAGE >= 60" | bc -l)" -eq 1 ]; then COLOR="orange"; fi
+          curl -sf -X PATCH \
+            -H "Authorization: token $GIST_TOKEN" \
+            -d "{\"files\":{\"updock-coverage.json\":{\"content\":\"{\\\"schemaVersion\\\":1,\\\"label\\\":\\\"coverage\\\",\\\"message\\\":\\\"${COVERAGE}%\\\",\\\"color\\\":\\\"${COLOR}\\\"}\"}}}" \
+            "https://api.github.com/gists/e1cdde41155f750c6d0e71f544df4f17"
+
       - name: Convert coverage to LCOV
         run: gcov2lcov -infile coverage.out -outfile lcov.info
 
