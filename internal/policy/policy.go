@@ -43,6 +43,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/huseyinbabal/updock/internal/gitops"
 	"gopkg.in/yaml.v3"
 )
 
@@ -94,7 +95,8 @@ const (
 )
 
 // Spec is the top-level structure of an updock.yml configuration file.
-// It defines update policies, per-container overrides, and container groups.
+// It defines update policies, per-container overrides, container groups,
+// and GitOps configuration.
 type Spec struct {
 	// Policies maps policy names to their definitions.
 	// The "default" policy is applied to containers without an explicit assignment.
@@ -106,6 +108,11 @@ type Spec struct {
 	// Groups defines sets of containers that should be updated together
 	// in a specific order.
 	Groups map[string]GroupDef `yaml:"groups"`
+
+	// GitOps configures automatic Git commits when images are updated.
+	// When enabled, Updock replaces the old image reference in the configured
+	// file (e.g. docker-compose.yml) and pushes the change to Git.
+	GitOps gitops.Config `yaml:"gitops"`
 }
 
 // PolicyDef defines an update policy with strategy, approval mode,

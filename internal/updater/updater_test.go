@@ -599,64 +599,7 @@ func TestRun_NoRestartMode(t *testing.T) {
 	assert.Contains(t, results[0].Error, "no-restart")
 }
 
-func TestRun_CleanupImages(t *testing.T) {
-	mockDocker := mocks.NewMockDockerClient(t)
-	ctx := context.Background()
-	cfg := &config.Config{MonitorAll: true, NoPull: true, CleanupImages: true}
-
-	containers := []docker.ContainerInfo{
-		{
-			ID:      "aabbccddee112233",
-			Name:    "nginx",
-			Image:   "nginx:latest",
-			ImageID: "sha256:oldimageid",
-			State:   "running",
-			Labels:  map[string]string{},
-		},
-	}
-
-	mockDocker.EXPECT().ListContainers(mock.Anything, false, false).Return(containers, nil)
-	mockDocker.EXPECT().RecreateContainer(mock.Anything, "aabbccddee112233", "nginx:latest", cfg.StopTimeout, "", false).Return("newcontainer112233", nil)
-	mockDocker.EXPECT().RemoveImage(mock.Anything, "sha256:oldimageid").Return(nil)
-
-	u := newTestUpdater(cfg, nil, mockDocker)
-	results, err := u.Run(ctx)
-
-	assert.NoError(t, err)
-	assert.Len(t, results, 1)
-	assert.True(t, results[0].Updated)
-}
-
-func TestRun_CustomStopSignal(t *testing.T) {
-	mockDocker := mocks.NewMockDockerClient(t)
-	ctx := context.Background()
-	cfg := &config.Config{MonitorAll: true, NoPull: true}
-
-	containers := []docker.ContainerInfo{
-		{
-			ID:      "aabbccddee112233",
-			Name:    "nginx",
-			Image:   "nginx:latest",
-			ImageID: "sha256:oldnginx",
-			State:   "running",
-			Labels: map[string]string{
-				config.LabelStopSignal: "SIGHUP",
-			},
-		},
-	}
-
-	mockDocker.EXPECT().ListContainers(mock.Anything, false, false).Return(containers, nil)
-	// Verify the custom signal is passed to RecreateContainer
-	mockDocker.EXPECT().RecreateContainer(mock.Anything, "aabbccddee112233", "nginx:latest", cfg.StopTimeout, "SIGHUP", false).Return("newcontainer112233", nil)
-
-	u := newTestUpdater(cfg, nil, mockDocker)
-	results, err := u.Run(ctx)
-
-	assert.NoError(t, err)
-	assert.Len(t, results, 1)
-	assert.True(t, results[0].Updated)
-}
-
+// Old cleanup/signal tests removed - newer versions below with proper policy spec
 func TestCheckAndUpdate_ImageByID(t *testing.T) {
 	mockDocker := mocks.NewMockDockerClient(t)
 	ctx := context.Background()
@@ -877,4 +820,187 @@ func TestRun_ManualApprovalSkip(t *testing.T) {
 	assert.Len(t, results, 1)
 	assert.True(t, results[0].Skipped)
 	assert.Contains(t, results[0].Error, "manual approval")
+}
+
+func TestRun_DigestStrategy_NoPull(t *testing.T) {
+	mockDocker := mocks.NewMockDockerClient(t)
+	cfg := &config.Config{MonitorAll: true, NoPull: true}
+	spec := &policy.Spec{
+		Policies:   map[string]policy.PolicyDef{"default": {Strategy: "all", Approve: "auto"}},
+		Containers: map[string]policy.ContainerDef{},
+		Groups:     map[string]policy.GroupDef{},
+	}
+	u := New(mockDocker, registry.NewClient(""), nil, cfg, spec, audit.NewLog(""))
+
+	// NoPull + strategy=all: skips all remote checks, goes straight to "update available"
+	// Then needs PullImage (but noPull), RecreateContainer
+	mockDocker.EXPECT().ListContainers(mock.Anything, false, false).Return([]docker.ContainerInfo{
+		{ID: "aaaaaaaaaaaa", Name: "nginx", Image: "nginx:1.25", ImageID: "sha256:digest123", State: "running", Labels: map[string]string{}},
+	}, nil)
+	mockDocker.EXPECT().RecreateContainer(mock.Anything, "aaaaaaaaaaaa", "nginx:1.25", mock.Anything, "", false).Return("newctr123456", nil)
+
+	results, err := u.Run(context.Background())
+	assert.NoError(t, err)
+	assert.Len(t, results, 1)
+	assert.True(t, results[0].Updated)
+}
+
+func TestRun_PatchStrategy_NoPull(t *testing.T) {
+	mockDocker := mocks.NewMockDockerClient(t)
+	cfg := &config.Config{MonitorAll: true, NoPull: true}
+	spec := &policy.Spec{
+		Policies:   map[string]policy.PolicyDef{"default": {Strategy: "patch", Approve: "auto"}},
+		Containers: map[string]policy.ContainerDef{},
+		Groups:     map[string]policy.GroupDef{},
+	}
+	u := New(mockDocker, registry.NewClient(""), nil, cfg, spec, audit.NewLog(""))
+
+	// NoPull skips all remote checks
+	mockDocker.EXPECT().ListContainers(mock.Anything, false, false).Return([]docker.ContainerInfo{
+		{ID: "aaaaaaaaaaaa", Name: "mydb", Image: "mysql:8.0.45", ImageID: "sha256:old", State: "running", Labels: map[string]string{}},
+	}, nil)
+	mockDocker.EXPECT().RecreateContainer(mock.Anything, "aaaaaaaaaaaa", "mysql:8.0.45", mock.Anything, "", false).Return("newctr123456", nil)
+
+	results, err := u.Run(context.Background())
+	assert.NoError(t, err)
+	assert.Len(t, results, 1)
+	assert.True(t, results[0].Updated)
+}
+
+func TestRun_LifecycleHooksExec(t *testing.T) {
+	mockDocker := mocks.NewMockDockerClient(t)
+	cfg := &config.Config{MonitorAll: true, LifecycleHooks: true, NoPull: true}
+	spec := policy.DefaultSpec()
+	u := New(mockDocker, registry.NewClient(""), nil, cfg, spec, audit.NewLog(""))
+
+	mockDocker.EXPECT().ListContainers(mock.Anything, false, false).Return([]docker.ContainerInfo{
+		{ID: "aaaaaaaaaaaa", Name: "app", Image: "myapp:latest", ImageID: "sha256:old", State: "running", Labels: map[string]string{
+			config.LabelPreCheck:   "echo precheck",
+			config.LabelPostCheck:  "echo postcheck",
+			config.LabelPreUpdate:  "echo preupdate",
+			config.LabelPostUpdate: "echo postupdate",
+		}},
+	}, nil)
+	mockDocker.EXPECT().ExecCommand(mock.Anything, "aaaaaaaaaaaa", "echo precheck", mock.Anything).Return("ok", nil)
+	mockDocker.EXPECT().ExecCommand(mock.Anything, "aaaaaaaaaaaa", "echo preupdate", mock.Anything).Return("ok", nil)
+	mockDocker.EXPECT().RecreateContainer(mock.Anything, "aaaaaaaaaaaa", "myapp:latest", mock.Anything, "", false).Return("newctr123456", nil)
+	mockDocker.EXPECT().ExecCommand(mock.Anything, "newctr123456", "echo postupdate", mock.Anything).Return("ok", nil)
+	mockDocker.EXPECT().ExecCommand(mock.Anything, "aaaaaaaaaaaa", "echo postcheck", mock.Anything).Return("ok", nil)
+
+	results, err := u.Run(context.Background())
+	assert.NoError(t, err)
+	assert.Len(t, results, 1)
+	assert.True(t, results[0].Updated)
+}
+
+func TestRun_CleanupImages(t *testing.T) {
+	mockDocker := mocks.NewMockDockerClient(t)
+	cfg := &config.Config{MonitorAll: true, NoPull: true, CleanupImages: true}
+	spec := policy.DefaultSpec()
+	u := New(mockDocker, registry.NewClient(""), nil, cfg, spec, audit.NewLog(""))
+
+	mockDocker.EXPECT().ListContainers(mock.Anything, false, false).Return([]docker.ContainerInfo{
+		{ID: "aaaaaaaaaaaa", Name: "app", Image: "myapp:latest", ImageID: "sha256:oldimg", State: "running", Labels: map[string]string{}},
+	}, nil)
+	mockDocker.EXPECT().RecreateContainer(mock.Anything, "aaaaaaaaaaaa", "myapp:latest", mock.Anything, "", false).Return("newctr123456", nil)
+	mockDocker.EXPECT().RemoveImage(mock.Anything, "sha256:oldimg").Return(nil)
+
+	results, err := u.Run(context.Background())
+	assert.NoError(t, err)
+	assert.Len(t, results, 1)
+	assert.True(t, results[0].Updated)
+}
+
+func TestRun_NoRestartMode_NoPull(t *testing.T) {
+	mockDocker := mocks.NewMockDockerClient(t)
+	cfg := &config.Config{MonitorAll: true, NoPull: true, NoRestart: true}
+	spec := policy.DefaultSpec()
+	u := New(mockDocker, registry.NewClient(""), nil, cfg, spec, audit.NewLog(""))
+
+	mockDocker.EXPECT().ListContainers(mock.Anything, false, false).Return([]docker.ContainerInfo{
+		{ID: "aaaaaaaaaaaa", Name: "app", Image: "myapp:latest", ImageID: "sha256:old", State: "running", Labels: map[string]string{}},
+	}, nil)
+
+	results, err := u.Run(context.Background())
+	assert.NoError(t, err)
+	assert.Len(t, results, 1)
+	assert.True(t, results[0].Updated)
+	assert.Contains(t, results[0].Error, "no-restart")
+}
+
+func TestRun_ImageByID_WithHooks(t *testing.T) {
+	mockDocker := mocks.NewMockDockerClient(t)
+	cfg := &config.Config{MonitorAll: true, LifecycleHooks: true, NoPull: true}
+	spec := policy.DefaultSpec()
+	u := New(mockDocker, registry.NewClient(""), nil, cfg, spec, audit.NewLog(""))
+
+	mockDocker.EXPECT().ListContainers(mock.Anything, false, false).Return([]docker.ContainerInfo{
+		{ID: "aaaaaaaaaaaa", Name: "app", Image: "sha256:someid", ImageID: "sha256:old", State: "running", Labels: map[string]string{
+			config.LabelPreCheck: "echo pre",
+		}},
+	}, nil)
+	mockDocker.EXPECT().ExecCommand(mock.Anything, "aaaaaaaaaaaa", "echo pre", mock.Anything).Return("ok", nil)
+
+	results, err := u.Run(context.Background())
+	assert.NoError(t, err)
+	assert.Len(t, results, 1)
+	assert.True(t, results[0].Skipped)
+}
+
+func TestRun_RecreateError(t *testing.T) {
+	mockDocker := mocks.NewMockDockerClient(t)
+	cfg := &config.Config{MonitorAll: true, NoPull: true}
+	spec := policy.DefaultSpec()
+	u := New(mockDocker, registry.NewClient(""), nil, cfg, spec, audit.NewLog(""))
+
+	mockDocker.EXPECT().ListContainers(mock.Anything, false, false).Return([]docker.ContainerInfo{
+		{ID: "aaaaaaaaaaaa", Name: "app", Image: "myapp:latest", ImageID: "sha256:old", State: "running", Labels: map[string]string{}},
+	}, nil)
+	mockDocker.EXPECT().RecreateContainer(mock.Anything, "aaaaaaaaaaaa", "myapp:latest", mock.Anything, "", false).Return("", errors.New("recreate failed"))
+
+	results, err := u.Run(context.Background())
+	assert.NoError(t, err)
+	assert.Len(t, results, 1)
+	assert.False(t, results[0].Updated)
+	assert.Contains(t, results[0].Error, "recreating container")
+}
+
+func TestRun_CustomStopSignal(t *testing.T) {
+	mockDocker := mocks.NewMockDockerClient(t)
+	cfg := &config.Config{MonitorAll: true, NoPull: true}
+	spec := policy.DefaultSpec()
+	u := New(mockDocker, registry.NewClient(""), nil, cfg, spec, audit.NewLog(""))
+
+	mockDocker.EXPECT().ListContainers(mock.Anything, false, false).Return([]docker.ContainerInfo{
+		{ID: "aaaaaaaaaaaa", Name: "app", Image: "myapp:latest", ImageID: "sha256:old", State: "running", Labels: map[string]string{
+			config.LabelStopSignal: "SIGQUIT",
+		}},
+	}, nil)
+	mockDocker.EXPECT().RecreateContainer(mock.Anything, "aaaaaaaaaaaa", "myapp:latest", mock.Anything, "SIGQUIT", false).Return("newctr123456", nil)
+
+	results, err := u.Run(context.Background())
+	assert.NoError(t, err)
+	assert.Len(t, results, 1)
+	assert.True(t, results[0].Updated)
+}
+
+func TestFindNewerTag_NonSemverTag(t *testing.T) {
+	u := New(nil, registry.NewClient(""), nil, &config.Config{}, policy.DefaultSpec(), audit.NewLog(""))
+	_, _, err := u.findNewerTag(context.Background(), "myapp:latest", "patch")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "not semver")
+}
+
+func TestFindNewerTag_RegistryError(t *testing.T) {
+	c := registry.NewClient("")
+	u := New(nil, c, nil, &config.Config{}, policy.DefaultSpec(), audit.NewLog(""))
+	_, _, err := u.findNewerTag(context.Background(), "myorg/myapp:1.0.0", "patch")
+	assert.Error(t, err)
+}
+
+func TestFindNewerTag_NoImageTag(t *testing.T) {
+	u := New(nil, registry.NewClient(""), nil, &config.Config{}, policy.DefaultSpec(), audit.NewLog(""))
+	_, _, err := u.findNewerTag(context.Background(), "myapp", "patch")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "not semver")
 }

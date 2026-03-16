@@ -39,10 +39,12 @@ import (
 	"github.com/huseyinbabal/updock/internal/audit"
 	"github.com/huseyinbabal/updock/internal/config"
 	"github.com/huseyinbabal/updock/internal/docker"
+	"github.com/huseyinbabal/updock/internal/gitops"
 	"github.com/huseyinbabal/updock/internal/metrics"
 	"github.com/huseyinbabal/updock/internal/notification"
 	"github.com/huseyinbabal/updock/internal/policy"
 	"github.com/huseyinbabal/updock/internal/registry"
+	"github.com/huseyinbabal/updock/internal/semver"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -294,30 +296,70 @@ func (u *Updater) checkAndUpdate(ctx context.Context, ctr docker.ContainerInfo) 
 
 	noPull := u.isNoPull(ctr)
 
+	// Determine update strategy from policy
+	pol := policy.PolicyDef{Strategy: policy.StrategyAll}
+	if u.spec != nil {
+		pol = u.spec.GetContainerPolicy(ctr.Name)
+	}
+	strategyStr := string(pol.Strategy)
+	if strategyStr == "" {
+		strategyStr = "all"
+	}
+
+	// newImageRef will hold the image reference to update to.
+	// It may be the same tag (digest change) or a different tag (semver upgrade).
+	newImageRef := ctr.Image
+
 	if !noPull {
-		// Get local image digest for comparison
-		localDigest, err := u.docker.GetImageDigest(ctx, ctr.ImageID)
-		if err != nil {
-			result.Error = fmt.Sprintf("getting local digest: %v", err)
-			log.Warnf("Error getting local digest for %s: %v", ctr.Name, err)
-			return result
-		}
-
-		// Check remote registry for a newer image
-		hasNew, _, err := u.registry.HasNewImage(ctx, ctr.Image, localDigest)
-		if err != nil {
-			result.Error = fmt.Sprintf("checking remote: %v", err)
-			log.Warnf("Error checking remote for %s: %v", ctr.Name, err)
-			return result
-		}
-
-		if !hasNew {
-			log.Debugf("Container %s is up to date", ctr.Name)
-			return result
+		// Try semver-based tag discovery for patch/minor/major strategies
+		if strategyStr == "patch" || strategyStr == "minor" || strategyStr == "major" {
+			newTag, found, err := u.findNewerTag(ctx, ctr.Image, strategyStr)
+			if err != nil {
+				log.Debugf("Semver tag discovery failed for %s, falling back to digest check: %v", ctr.Name, err)
+			} else if found {
+				newImageRef = newTag
+				log.Infof("Semver upgrade found for %s: %s -> %s", ctr.Name, ctr.Image, newTag)
+			} else {
+				// No newer semver tag found; also check digest for same tag
+				localDigest, err := u.docker.GetImageDigest(ctx, ctr.ImageID)
+				if err != nil {
+					result.Error = fmt.Sprintf("getting local digest: %v", err)
+					log.Warnf("Error getting local digest for %s: %v", ctr.Name, err)
+					return result
+				}
+				hasNew, _, err := u.registry.HasNewImage(ctx, ctr.Image, localDigest)
+				if err != nil {
+					result.Error = fmt.Sprintf("checking remote: %v", err)
+					log.Warnf("Error checking remote for %s: %v", ctr.Name, err)
+					return result
+				}
+				if !hasNew {
+					log.Debugf("Container %s is up to date", ctr.Name)
+					return result
+				}
+			}
+		} else {
+			// "all" or "digest" strategy: only check digest change for the same tag
+			localDigest, err := u.docker.GetImageDigest(ctx, ctr.ImageID)
+			if err != nil {
+				result.Error = fmt.Sprintf("getting local digest: %v", err)
+				log.Warnf("Error getting local digest for %s: %v", ctr.Name, err)
+				return result
+			}
+			hasNew, _, err := u.registry.HasNewImage(ctx, ctr.Image, localDigest)
+			if err != nil {
+				result.Error = fmt.Sprintf("checking remote: %v", err)
+				log.Warnf("Error checking remote for %s: %v", ctr.Name, err)
+				return result
+			}
+			if !hasNew {
+				log.Debugf("Container %s is up to date", ctr.Name)
+				return result
+			}
 		}
 	}
 
-	log.Infof("Update available for container %s (%s)", ctr.Name, ctr.Image)
+	log.Infof("Update available for container %s (%s -> %s)", ctr.Name, ctr.Image, newImageRef)
 
 	// Record in audit log
 	if u.audit != nil {
@@ -407,8 +449,8 @@ func (u *Updater) checkAndUpdate(ctx context.Context, ctr docker.ContainerInfo) 
 
 	// Pull the new image (unless no-pull mode)
 	if !noPull {
-		registryAuth := u.registry.GetRegistryAuth(ctr.Image)
-		newImageID, err := u.docker.PullImage(ctx, ctr.Image, registryAuth)
+		registryAuth := u.registry.GetRegistryAuth(newImageRef)
+		newImageID, err := u.docker.PullImage(ctx, newImageRef, registryAuth)
 		if err != nil {
 			result.Error = fmt.Sprintf("pulling new image: %v", err)
 			log.Errorf("Error pulling image for %s: %v", ctr.Name, err)
@@ -434,9 +476,9 @@ func (u *Updater) checkAndUpdate(ctx context.Context, ctr docker.ContainerInfo) 
 	// Get custom stop signal from label
 	customSignal := ctr.Labels[config.LabelStopSignal]
 
-	// Recreate the container with the new image
+	// Recreate the container with the new image reference (may be a different tag)
 	newContainerID, err := u.docker.RecreateContainer(
-		ctx, ctr.ID, ctr.Image, u.cfg.StopTimeout, customSignal, u.cfg.RemoveVolumes,
+		ctx, ctr.ID, newImageRef, u.cfg.StopTimeout, customSignal, u.cfg.RemoveVolumes,
 	)
 	if err != nil {
 		result.Error = fmt.Sprintf("recreating container: %v", err)
@@ -445,7 +487,7 @@ func (u *Updater) checkAndUpdate(ctx context.Context, ctr docker.ContainerInfo) 
 	}
 
 	result.Updated = true
-	log.Infof("Successfully updated container %s -> %s", ctr.Name, newContainerID[:12])
+	log.Infof("Successfully updated container %s -> %s (%s)", ctr.Name, newContainerID[:12], newImageRef)
 
 	// Execute post-update lifecycle hook
 	if u.cfg.LifecycleHooks {
@@ -460,12 +502,71 @@ func (u *Updater) checkAndUpdate(ctx context.Context, ctr docker.ContainerInfo) 
 		}
 	}
 
+	// GitOps: commit image change to Git
+	if u.spec != nil && u.spec.GitOps.Enabled && newImageRef != ctr.Image {
+		gc := gitops.NewClient(u.spec.GitOps)
+		if err := gc.PushChange(gitops.Change{
+			Image:  strings.Split(ctr.Image, ":")[0],
+			OldTag: strings.SplitN(ctr.Image, ":", 2)[1],
+			NewTag: strings.SplitN(newImageRef, ":", 2)[1],
+			OldRef: ctr.Image,
+			NewRef: newImageRef,
+		}); err != nil {
+			log.Warnf("GitOps push failed for %s: %v", ctr.Name, err)
+		}
+	}
+
 	// Send update notification
 	if u.notifier != nil {
 		u.notifier.NotifyUpdate(result)
 	}
 
 	return result
+}
+
+// findNewerTag queries the registry for all tags and finds the best candidate
+// based on semver rules and the configured strategy.
+//
+// Returns the full new image reference (e.g. "mysql:8.0.46"), whether a newer
+// tag was found, and any error.
+func (u *Updater) findNewerTag(ctx context.Context, imageRef string, strategy string) (string, bool, error) {
+	// Parse current tag
+	parts := strings.SplitN(imageRef, ":", 2)
+	imageName := parts[0]
+	currentTag := "latest"
+	if len(parts) == 2 {
+		currentTag = parts[1]
+	}
+
+	currentVer, err := semver.Parse(currentTag)
+	if err != nil {
+		return "", false, fmt.Errorf("current tag %q is not semver: %w", currentTag, err)
+	}
+
+	// List all tags from registry
+	tags, err := u.registry.ListTags(ctx, imageRef)
+	if err != nil {
+		return "", false, fmt.Errorf("listing tags: %w", err)
+	}
+
+	// Parse all tags as semver, filter invalid ones
+	var candidates []semver.Version
+	for _, tag := range tags {
+		v, err := semver.Parse(tag)
+		if err != nil {
+			continue // skip non-semver tags
+		}
+		candidates = append(candidates, v)
+	}
+
+	// Find best candidate by strategy
+	best := semver.FilterByStrategy(currentVer, candidates, strategy)
+	if best == nil {
+		return "", false, nil // no newer version found
+	}
+
+	newRef := imageName + ":" + best.Original
+	return newRef, true, nil
 }
 
 // execLifecycleHook runs a lifecycle hook command inside a container.
