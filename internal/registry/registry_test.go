@@ -192,127 +192,182 @@ func TestGetRegistryAuth_DockerHubAlias(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// New tests using httptest
+// httptest-based tests for registry HTTP methods
 // ---------------------------------------------------------------------------
 
-func TestGetRemoteDigest_Success(t *testing.T) {
-	// Mock token endpoint
-	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(tokenResponse{Token: "test-token-123"})
-	}))
-	defer tokenServer.Close()
-
-	// Mock manifest endpoint
-	manifestServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Verify auth header is present
-		authHeader := r.Header.Get("Authorization")
-		if authHeader != "Bearer test-token-123" {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-		w.Header().Set("Docker-Content-Digest", "sha256:abcdef1234567890")
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer manifestServer.Close()
-
-	// We can't easily override the hardcoded URLs in the Client, so we test
-	// the HasNewImage pure logic instead. The HTTP interaction is tested
-	// indirectly through the structure.
-	// For actual HTTP testing, we verify the test server responses work correctly.
-	ctx := context.Background()
-
-	// Test that the token server returns a valid token
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, tokenServer.URL, nil)
-	assert.NoError(t, err)
-	resp, err := http.DefaultClient.Do(req)
-	assert.NoError(t, err)
-	defer func() { _ = resp.Body.Close() }()
-	assert.Equal(t, http.StatusOK, resp.StatusCode)
-
-	var tokenResp tokenResponse
-	err = json.NewDecoder(resp.Body).Decode(&tokenResp)
-	assert.NoError(t, err)
-	assert.Equal(t, "test-token-123", tokenResp.Token)
-
-	// Test that the manifest server returns a digest
-	req2, err := http.NewRequestWithContext(ctx, http.MethodHead, manifestServer.URL, nil)
-	assert.NoError(t, err)
-	req2.Header.Set("Authorization", "Bearer test-token-123")
-	resp2, err := http.DefaultClient.Do(req2)
-	assert.NoError(t, err)
-	defer func() { _ = resp2.Body.Close() }()
-	assert.Equal(t, http.StatusOK, resp2.StatusCode)
-	assert.Equal(t, "sha256:abcdef1234567890", resp2.Header.Get("Docker-Content-Digest"))
-}
-
-func TestGetRemoteDigest_AuthError(t *testing.T) {
-	// Mock token endpoint that returns 401
-	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-	}))
-	defer tokenServer.Close()
-
-	ctx := context.Background()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, tokenServer.URL, nil)
-	assert.NoError(t, err)
-	resp, err := http.DefaultClient.Do(req)
-	assert.NoError(t, err)
-	defer func() { _ = resp.Body.Close() }()
-	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
-}
-
-func TestHasNewImage_NewAvailable(t *testing.T) {
-	// Test the comparison logic with a mock HTTP server for both token and manifest
-	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(tokenResponse{Token: "test-token"})
-	}))
-	defer tokenServer.Close()
-
-	remoteDigest := "sha256:newdigest111222333"
-	localDigest := "sha256:olddigest444555666"
-
-	// Test the pure comparison logic that HasNewImage uses
-	// Different digests should indicate a new image is available
-	hasNew := remoteDigest != localDigest
-	assert.True(t, hasNew, "different digests should indicate new image available")
-}
-
-func TestHasNewImage_UpToDate(t *testing.T) {
-	remoteDigest := "sha256:samedigest111222333"
-	localDigest := "sha256:samedigest111222333"
-
-	// Same digests should indicate up to date
-	hasNew := remoteDigest != localDigest
-	assert.False(t, hasNew, "same digests should indicate up to date")
+// newTestClient creates a registry Client with auth/registry URLs pointing to test servers.
+func newTestClient(authURL, registryURL string) *Client {
+	return &Client{
+		httpClient:  &http.Client{},
+		authConfigs: make(map[string]AuthConfig),
+		authURL:     authURL,
+		registryURL: registryURL,
+	}
 }
 
 func TestGetToken_Success(t *testing.T) {
-	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Verify the expected query parameters
-		assert.Contains(t, r.URL.RawQuery, "service=")
-		assert.Contains(t, r.URL.RawQuery, "scope=")
-
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Contains(t, r.URL.RawQuery, "scope=repository:library/nginx:pull")
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(tokenResponse{Token: "test-bearer-token"})
+		_ = json.NewEncoder(w).Encode(tokenResponse{Token: "tok-123"})
 	}))
-	defer tokenServer.Close()
+	defer srv.Close()
 
-	ctx := context.Background()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, tokenServer.URL+"?service=registry.docker.io&scope=repository:library/nginx:pull", nil)
+	c := newTestClient(srv.URL, "")
+	token, err := c.getToken(context.Background(), "library/nginx")
 	assert.NoError(t, err)
+	assert.Equal(t, "tok-123", token)
+}
 
-	resp, err := http.DefaultClient.Do(req)
+func TestGetToken_Error(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+
+	c := newTestClient(srv.URL, "")
+	_, err := c.getToken(context.Background(), "library/nginx")
+	assert.Error(t, err)
+}
+
+func TestGetToken_BadJSON(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("not json"))
+	}))
+	defer srv.Close()
+
+	c := newTestClient(srv.URL, "")
+	_, err := c.getToken(context.Background(), "library/nginx")
+	assert.Error(t, err)
+}
+
+func TestGetRemoteDigest_Success(t *testing.T) {
+	authSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(tokenResponse{Token: "tok"})
+	}))
+	defer authSrv.Close()
+
+	regSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "Bearer tok", r.Header.Get("Authorization"))
+		w.Header().Set("Docker-Content-Digest", "sha256:abc123")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer regSrv.Close()
+
+	c := newTestClient(authSrv.URL, regSrv.URL)
+	digest, err := c.GetRemoteDigest(context.Background(), "nginx:latest")
 	assert.NoError(t, err)
-	defer func() { _ = resp.Body.Close() }()
+	assert.Equal(t, "sha256:abc123", digest)
+}
 
-	assert.Equal(t, http.StatusOK, resp.StatusCode)
+func TestGetRemoteDigest_ManifestError(t *testing.T) {
+	authSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(tokenResponse{Token: "tok"})
+	}))
+	defer authSrv.Close()
 
-	var tokenResp tokenResponse
-	err = json.NewDecoder(resp.Body).Decode(&tokenResp)
+	regSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer regSrv.Close()
+
+	c := newTestClient(authSrv.URL, regSrv.URL)
+	_, err := c.GetRemoteDigest(context.Background(), "nginx:latest")
+	assert.Error(t, err)
+}
+
+func TestGetRemoteDigest_NoDigestHeader(t *testing.T) {
+	authSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(tokenResponse{Token: "tok"})
+	}))
+	defer authSrv.Close()
+
+	regSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK) // no Docker-Content-Digest header
+	}))
+	defer regSrv.Close()
+
+	c := newTestClient(authSrv.URL, regSrv.URL)
+	_, err := c.GetRemoteDigest(context.Background(), "nginx:latest")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "no digest")
+}
+
+func TestGetRemoteDigest_AuthFailure(t *testing.T) {
+	authSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer authSrv.Close()
+
+	c := newTestClient(authSrv.URL, "http://unused")
+	_, err := c.GetRemoteDigest(context.Background(), "nginx:latest")
+	assert.Error(t, err)
+}
+
+func TestHasNewImage_NewAvailable(t *testing.T) {
+	authSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(tokenResponse{Token: "tok"})
+	}))
+	defer authSrv.Close()
+
+	regSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Docker-Content-Digest", "sha256:newdigest")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer regSrv.Close()
+
+	c := newTestClient(authSrv.URL, regSrv.URL)
+	hasNew, digest, err := c.HasNewImage(context.Background(), "nginx:latest", "sha256:olddigest")
 	assert.NoError(t, err)
-	assert.Equal(t, "test-bearer-token", tokenResp.Token)
+	assert.True(t, hasNew)
+	assert.Equal(t, "sha256:newdigest", digest)
+}
+
+func TestHasNewImage_UpToDate(t *testing.T) {
+	authSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(tokenResponse{Token: "tok"})
+	}))
+	defer authSrv.Close()
+
+	regSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Docker-Content-Digest", "sha256:samedigest")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer regSrv.Close()
+
+	c := newTestClient(authSrv.URL, regSrv.URL)
+	hasNew, _, err := c.HasNewImage(context.Background(), "nginx:latest", "sha256:samedigest")
+	assert.NoError(t, err)
+	assert.False(t, hasNew)
+}
+
+func TestHasNewImage_Error(t *testing.T) {
+	authSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer authSrv.Close()
+
+	c := newTestClient(authSrv.URL, "http://unused")
+	_, _, err := c.HasNewImage(context.Background(), "nginx:latest", "sha256:old")
+	assert.Error(t, err)
+}
+
+func TestGetToken_WithCredentials(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user, pass, ok := r.BasicAuth()
+		assert.True(t, ok)
+		assert.Equal(t, "myuser", user)
+		assert.Equal(t, "mypass", pass)
+		_ = json.NewEncoder(w).Encode(tokenResponse{Token: "authed-tok"})
+	}))
+	defer srv.Close()
+
+	c := newTestClient(srv.URL, "")
+	c.authConfigs["https://index.docker.io/v1/"] = AuthConfig{Username: "myuser", Password: "mypass"}
+
+	token, err := c.getToken(context.Background(), "library/nginx")
+	assert.NoError(t, err)
+	assert.Equal(t, "authed-tok", token)
 }
 
 func TestNewClient_MissingConfigFile(t *testing.T) {

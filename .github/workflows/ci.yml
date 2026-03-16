@@ -44,7 +44,7 @@ jobs:
           grep -v '/mocks/' coverage.out | grep -v 'internal/docker/client.go' > coverage-filtered.out
           COVERAGE=$(go tool cover -func=coverage-filtered.out | grep ^total | awk '{print $3}' | tr -d '%')
           echo "Coverage (excluding mocks & docker daemon): ${COVERAGE}%"
-          THRESHOLD=75
+          THRESHOLD=80
           if [ "$(echo "$COVERAGE < $THRESHOLD" | bc -l)" -eq 1 ]; then
             echo "::error::Coverage ${COVERAGE}% is below threshold ${THRESHOLD}%"
             exit 1

@@ -40,6 +40,11 @@ import (
 type Client struct {
 	httpClient  *http.Client
 	authConfigs map[string]AuthConfig // registry hostname -> credentials
+
+	// registryURL and authURL are overridable for testing.
+	// In production these point to Docker Hub endpoints.
+	registryURL string // default: https://registry-1.docker.io
+	authURL     string // default: https://auth.docker.io
 }
 
 // AuthConfig holds credentials for a Docker registry.
@@ -65,6 +70,8 @@ func NewClient(configPath string) *Client {
 			Timeout: 30 * time.Second,
 		},
 		authConfigs: make(map[string]AuthConfig),
+		registryURL: "https://registry-1.docker.io",
+		authURL:     "https://auth.docker.io",
 	}
 
 	if configPath != "" {
@@ -156,8 +163,8 @@ type tokenResponse struct {
 // For private repositories, credentials from the config are used.
 func (c *Client) getToken(ctx context.Context, repo string) (string, error) {
 	url := fmt.Sprintf(
-		"https://auth.docker.io/token?service=registry.docker.io&scope=repository:%s:pull",
-		repo,
+		"%s/token?service=registry.docker.io&scope=repository:%s:pull",
+		c.authURL, repo,
 	)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -237,7 +244,7 @@ func (c *Client) GetRemoteDigest(ctx context.Context, imageRef string) (string, 
 		return "", fmt.Errorf("getting auth token for %s: %w", repo, err)
 	}
 
-	url := fmt.Sprintf("https://registry-1.docker.io/v2/%s/manifests/%s", repo, tag)
+	url := fmt.Sprintf("%s/v2/%s/manifests/%s", c.registryURL, repo, tag)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodHead, url, nil)
 	if err != nil {
