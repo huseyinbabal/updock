@@ -25,7 +25,7 @@ If you run `docker login` on the host, credentials are stored in `~/.docker/conf
 ```yaml
 services:
   updock:
-    image: updock/updock
+    image: ghcr.io/huseyinbabal/updock:latest
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - /home/deploy/.docker/config.json:/config.json:ro

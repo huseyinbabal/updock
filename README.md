@@ -11,7 +11,7 @@ Declarative container update platform with policy engine, audit trail, and web d
 # docker-compose.yml
 services:
   updock:
-    image: updock
+    image: ghcr.io/huseyinbabal/updock:latest
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./updock.yml:/etc/updock/updock.yml

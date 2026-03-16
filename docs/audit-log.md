@@ -15,7 +15,7 @@ Mount a volume to persist the audit log across container restarts:
 ```yaml
 services:
   updock:
-    image: updock
+    image: ghcr.io/huseyinbabal/updock:latest
     volumes:
       - updock-data:/var/lib/updock
       - /var/run/docker.sock:/var/run/docker.sock

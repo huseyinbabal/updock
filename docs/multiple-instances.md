@@ -13,14 +13,14 @@ Assign a unique scope to each Updock instance:
 ```yaml
 services:
   updock-production:
-    image: updock/updock
+    image: ghcr.io/huseyinbabal/updock:latest
     environment:
       - UPDOCK_SCOPE=production
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
 
   updock-staging:
-    image: updock/updock
+    image: ghcr.io/huseyinbabal/updock:latest
     environment:
       - UPDOCK_SCOPE=staging
     volumes:
@@ -78,7 +78,7 @@ The Updock container itself should carry the scope label to ensure it is managed
 ```yaml
 services:
   updock-prod:
-    image: updock/updock
+    image: ghcr.io/huseyinbabal/updock:latest
     environment:
       - UPDOCK_SCOPE=production
     labels:
@@ -96,7 +96,7 @@ services:
 services:
   # Updock instances
   updock-prod:
-    image: updock/updock
+    image: ghcr.io/huseyinbabal/updock:latest
     environment:
       - UPDOCK_SCOPE=prod
       - UPDOCK_INTERVAL=86400
@@ -106,7 +106,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
 
   updock-staging:
-    image: updock/updock
+    image: ghcr.io/huseyinbabal/updock:latest
     environment:
       - UPDOCK_SCOPE=staging
       - UPDOCK_INTERVAL=3600
@@ -116,7 +116,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
 
   updock-dev:
-    image: updock/updock
+    image: ghcr.io/huseyinbabal/updock:latest
     environment:
       - UPDOCK_SCOPE=dev
       - UPDOCK_INTERVAL=300

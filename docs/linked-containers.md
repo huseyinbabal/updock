@@ -98,7 +98,7 @@ The per-container label overrides the global `--stop-timeout` flag.
 ```yaml
 services:
   updock:
-    image: updock/updock
+    image: ghcr.io/huseyinbabal/updock:latest
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     environment:

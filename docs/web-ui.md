@@ -97,7 +97,7 @@ When `--http-api-token` is set, the Web UI prompts for the token on first access
 ```yaml
 services:
   updock:
-    image: updock/updock
+    image: ghcr.io/huseyinbabal/updock:latest
     ports:
       - "8080:8080"
     environment:

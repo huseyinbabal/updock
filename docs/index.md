@@ -41,7 +41,7 @@ different approach:
     ```yaml
     services:
       updock:
-        image: updock
+        image: ghcr.io/huseyinbabal/updock:latest
         volumes:
           - /var/run/docker.sock:/var/run/docker.sock
           - ./updock.yml:/etc/updock/updock.yml
