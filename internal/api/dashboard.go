@@ -80,7 +80,8 @@ const dashboardHTML = `<!DOCTYPE html>
     <!-- Login overlay -->
     <div class="login-overlay" id="login-overlay" style="display:none;">
         <div class="login-card">
-            <h2>&#x1F433; Updock</h2>
+            <img src="/logo.png" alt="Updock" style="width:64px;height:64px;margin-bottom:12px;border-radius:12px;">
+            <h2>Updock</h2>
             <p>Enter your API token to access the dashboard.</p>
             <div class="login-error" id="login-error">Invalid token. Please try again.</div>
             <input type="password" id="login-token" placeholder="API Token" autofocus>
@@ -91,7 +92,7 @@ const dashboardHTML = `<!DOCTYPE html>
     <!-- Dashboard -->
     <div id="app" style="display:none;">
         <div class="header">
-            <h1>&#x1F433; Updock</h1>
+            <h1><img src="/logo.png" alt="Updock" style="width:32px;height:32px;border-radius:6px;"> Updock</h1>
             <div class="header-actions">
                 <span id="health-badge" class="badge badge-healthy">Healthy</span>
                 <span id="version-badge" class="badge badge-info">v-</span>

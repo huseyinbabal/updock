@@ -91,6 +91,9 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("GET /api/audit", s.withAuth(s.handleAuditLog))
 	s.mux.HandleFunc("GET /api/policies", s.withAuth(s.handlePolicies))
 
+	// Static assets
+	s.mux.HandleFunc("GET /logo.png", s.handleLogo)
+
 	// Prometheus metrics endpoint
 	if s.cfg.MetricsEnabled {
 		s.mux.Handle("GET /metrics", promhttp.Handler())

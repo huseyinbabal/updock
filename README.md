@@ -1,9 +1,15 @@
-# Updock
+<p align="center">
+  <img src="internal/api/assets/updock-logo.png" alt="Updock" width="160">
+</p>
 
-[![CI](https://github.com/huseyinbabal/updock/actions/workflows/ci.yml/badge.svg)](https://github.com/huseyinbabal/updock/actions/workflows/ci.yml)
-[![coverage](https://raw.githubusercontent.com/huseyinbabal/updock/badges/.badges/main/coverage.svg)](https://github.com/huseyinbabal/updock/actions/workflows/ci.yml)
+<h1 align="center">Updock</h1>
 
-Declarative container update platform with policy engine, audit trail, and web dashboard.
+<p align="center">
+  <a href="https://github.com/huseyinbabal/updock/actions/workflows/ci.yml"><img src="https://github.com/huseyinbabal/updock/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/huseyinbabal/updock/actions/workflows/ci.yml"><img src="https://raw.githubusercontent.com/huseyinbabal/updock/badges/.badges/main/coverage.svg" alt="coverage"></a>
+</p>
+
+<p align="center">Declarative container update platform with policy engine, audit trail, and web dashboard.</p>
 
 ## Quick Start
 
