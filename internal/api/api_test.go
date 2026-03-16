@@ -29,7 +29,7 @@ func newTestServer(t *testing.T, token string) (*Server, *mocks.MockDockerClient
 		MonitorAll:     true,
 	}
 	upd := updater.New(mockDocker, nil, nil, cfg, policy.DefaultSpec(), audit.NewLog(""))
-	return NewServer(mockDocker, upd, cfg), mockDocker
+	return NewServer(mockDocker, upd, cfg, policy.DefaultSpec()), mockDocker
 }
 
 func TestWithAuth_NoToken(t *testing.T) {

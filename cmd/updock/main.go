@@ -263,7 +263,7 @@ func run(cmd *cobra.Command, args []string) error {
 
 	// Start HTTP server (Web UI + API)
 	if cfg.HTTPEnabled {
-		server := api.NewServer(dockerClient, upd, cfg)
+		server := api.NewServer(dockerClient, upd, cfg, spec)
 		go func() {
 			if err := server.Start(); err != nil && err != http.ErrServerClosed {
 				log.Errorf("HTTP server error: %v", err)

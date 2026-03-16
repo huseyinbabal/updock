@@ -45,6 +45,7 @@ nav:
     - Fleet & Multi-Instance: multiple-instances.md
     - Notifications & Webhooks: notifications.md
   - Examples:
+    - Web Dashboard Usage: examples/web-dashboard.md
     - Homelab Media Server: examples/homelab-media.md
     - Web App with Database: examples/webapp-database.md
     - CI/CD One-Shot Check: examples/ci-cd-check.md

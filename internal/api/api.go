@@ -42,6 +42,7 @@ import (
 
 	"github.com/huseyinbabal/updock/internal/config"
 	"github.com/huseyinbabal/updock/internal/docker"
+	"github.com/huseyinbabal/updock/internal/policy"
 	"github.com/huseyinbabal/updock/internal/updater"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	log "github.com/sirupsen/logrus"
@@ -54,17 +55,19 @@ type Server struct {
 	docker  docker.DockerClient
 	updater *updater.Updater
 	cfg     *config.Config
+	spec    *policy.Spec
 	mux     *http.ServeMux
 	server  *http.Server
 }
 
 // NewServer creates a new API server with all routes configured.
 // The server is not started until [Server.Start] is called.
-func NewServer(dockerClient docker.DockerClient, upd *updater.Updater, cfg *config.Config) *Server {
+func NewServer(dockerClient docker.DockerClient, upd *updater.Updater, cfg *config.Config, spec *policy.Spec) *Server {
 	s := &Server{
 		docker:  dockerClient,
 		updater: upd,
 		cfg:     cfg,
+		spec:    spec,
 		mux:     http.NewServeMux(),
 	}
 
@@ -86,6 +89,7 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("GET /api/history", s.withAuth(s.handleHistory))
 	s.mux.HandleFunc("GET /api/info", s.withAuth(s.handleInfo))
 	s.mux.HandleFunc("GET /api/audit", s.withAuth(s.handleAuditLog))
+	s.mux.HandleFunc("GET /api/policies", s.withAuth(s.handlePolicies))
 
 	// Prometheus metrics endpoint
 	if s.cfg.MetricsEnabled {
@@ -276,6 +280,22 @@ func (s *Server) handleInfo(w http.ResponseWriter, _ *http.Request) {
 		"dryRun":     s.cfg.DryRun,
 		"scope":      s.cfg.Scope,
 	})
+}
+
+// handlePolicies returns the loaded policy spec (policies, containers, groups).
+//
+//	GET /api/policies
+//	Response: policy.Spec
+func (s *Server) handlePolicies(w http.ResponseWriter, _ *http.Request) {
+	if s.spec == nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"policies":   map[string]interface{}{},
+			"containers": map[string]interface{}{},
+			"groups":     map[string]interface{}{},
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, s.spec)
 }
 
 // handleAuditLog returns the audit log entries.
