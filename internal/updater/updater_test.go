@@ -2,6 +2,7 @@ package updater
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -783,4 +784,97 @@ func TestOrderByDependencies(t *testing.T) {
 	assert.True(t, workerIdx >= 0, "worker should be in results")
 	assert.True(t, dbIdx >= 0, "database should be in results")
 	assert.True(t, workerIdx < dbIdx, "worker (dependent) should be processed before database (dependency) in this algorithm")
+}
+
+// ---------------------------------------------------------------------------
+// Additional coverage for checkAndUpdate paths
+// ---------------------------------------------------------------------------
+
+func TestRun_ImageByID_Skips(t *testing.T) {
+	mockDocker := mocks.NewMockDockerClient(t)
+	cfg := &config.Config{MonitorAll: true}
+	u := New(mockDocker, registry.NewClient(""), nil, cfg, policy.DefaultSpec(), audit.NewLog(""))
+
+	// Container with sha256: image should be skipped
+	mockDocker.EXPECT().ListContainers(mock.Anything, false, false).Return([]docker.ContainerInfo{
+		{ID: "aaaaaaaaaaaa", Name: "myapp", Image: "sha256:abc123", State: "running", Labels: map[string]string{}},
+	}, nil)
+
+	results, err := u.Run(context.Background())
+	assert.NoError(t, err)
+	assert.Len(t, results, 1)
+	assert.True(t, results[0].Skipped)
+	assert.Contains(t, results[0].Error, "image specified by ID")
+}
+
+func TestRun_StoppedNotRevived(t *testing.T) {
+	mockDocker := mocks.NewMockDockerClient(t)
+	cfg := &config.Config{MonitorAll: true, IncludeStopped: true, ReviveStopped: false, NoPull: true}
+	u := New(mockDocker, registry.NewClient(""), nil, cfg, policy.DefaultSpec(), audit.NewLog(""))
+
+	mockDocker.EXPECT().ListContainers(mock.Anything, true, false).Return([]docker.ContainerInfo{
+		{ID: "aaaaaaaaaaaa", Name: "myapp", Image: "nginx:latest", ImageID: "sha256:old", State: "exited", Labels: map[string]string{}},
+	}, nil)
+
+	results, err := u.Run(context.Background())
+	assert.NoError(t, err)
+	assert.Len(t, results, 1)
+	// Should be skipped because container is stopped and revive is false
+	assert.True(t, results[0].Skipped)
+	assert.Contains(t, results[0].Error, "stopped")
+}
+
+func TestRun_ListError(t *testing.T) {
+	mockDocker := mocks.NewMockDockerClient(t)
+	cfg := &config.Config{MonitorAll: true}
+	u := New(mockDocker, registry.NewClient(""), nil, cfg, policy.DefaultSpec(), audit.NewLog(""))
+
+	mockDocker.EXPECT().ListContainers(mock.Anything, false, false).Return(nil, errors.New("docker error"))
+
+	_, err := u.Run(context.Background())
+	assert.Error(t, err)
+}
+
+func TestRun_GetImageDigestError(t *testing.T) {
+	mockDocker := mocks.NewMockDockerClient(t)
+	cfg := &config.Config{MonitorAll: true, NoPull: false}
+	u := New(mockDocker, registry.NewClient(""), nil, cfg, policy.DefaultSpec(), audit.NewLog(""))
+
+	mockDocker.EXPECT().ListContainers(mock.Anything, false, false).Return([]docker.ContainerInfo{
+		{ID: "aaaaaaaaaaaa", Name: "myapp", Image: "nginx:latest", ImageID: "sha256:old", State: "running", Labels: map[string]string{}},
+	}, nil)
+	mockDocker.EXPECT().GetImageDigest(mock.Anything, "sha256:old").Return("", errors.New("digest error"))
+
+	results, err := u.Run(context.Background())
+	assert.NoError(t, err)
+	assert.Len(t, results, 1)
+	assert.Contains(t, results[0].Error, "getting local digest")
+}
+
+func TestRun_ManualApprovalSkip(t *testing.T) {
+	mockDocker := mocks.NewMockDockerClient(t)
+	cfg := &config.Config{MonitorAll: true, NoPull: true}
+
+	spec := &policy.Spec{
+		Policies: map[string]policy.PolicyDef{
+			"default":  {Strategy: policy.StrategyAll, Approve: policy.ApproveAuto},
+			"cautious": {Strategy: policy.StrategyAll, Approve: policy.ApproveManual},
+		},
+		Containers: map[string]policy.ContainerDef{
+			"myapp": {Policy: "cautious"},
+		},
+		Groups: map[string]policy.GroupDef{},
+	}
+
+	u := New(mockDocker, registry.NewClient(""), nil, cfg, spec, audit.NewLog(""))
+
+	mockDocker.EXPECT().ListContainers(mock.Anything, false, false).Return([]docker.ContainerInfo{
+		{ID: "aaaaaaaaaaaa", Name: "myapp", Image: "nginx:latest", ImageID: "sha256:old", State: "running", Labels: map[string]string{}},
+	}, nil)
+
+	results, err := u.Run(context.Background())
+	assert.NoError(t, err)
+	assert.Len(t, results, 1)
+	assert.True(t, results[0].Skipped)
+	assert.Contains(t, results[0].Error, "manual approval")
 }

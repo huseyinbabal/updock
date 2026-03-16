@@ -412,3 +412,102 @@ func TestHandleTriggerUpdate(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, "Update check completed", result["message"])
 }
+
+func TestHandlePolicies_WithSpec(t *testing.T) {
+	s, _ := newTestServer(t, "")
+
+	req := httptest.NewRequest("GET", "/api/policies", nil)
+	w := httptest.NewRecorder()
+	s.handlePolicies(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	var result map[string]interface{}
+	err := json.Unmarshal(w.Body.Bytes(), &result)
+	assert.NoError(t, err)
+	// DefaultSpec has a "default" policy
+	policies, ok := result["Policies"]
+	assert.True(t, ok, "should have Policies key")
+	assert.NotNil(t, policies)
+}
+
+func TestHandlePolicies_NilSpec(t *testing.T) {
+	s, _ := newTestServer(t, "")
+	s.spec = nil
+
+	req := httptest.NewRequest("GET", "/api/policies", nil)
+	w := httptest.NewRecorder()
+	s.handlePolicies(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestHandleLogo(t *testing.T) {
+	s, _ := newTestServer(t, "")
+
+	req := httptest.NewRequest("GET", "/logo.png", nil)
+	w := httptest.NewRecorder()
+	s.handleLogo(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "image/png", w.Header().Get("Content-Type"))
+	assert.Contains(t, w.Header().Get("Cache-Control"), "max-age")
+	assert.Greater(t, w.Body.Len(), 0)
+}
+
+func TestHandleTriggerUpdate_Error(t *testing.T) {
+	s, mockDocker := newTestServer(t, "")
+	mockDocker.EXPECT().ListContainers(mock.Anything, false, false).Return(nil, errors.New("docker down"))
+
+	req := httptest.NewRequest("POST", "/api/update", nil)
+	w := httptest.NewRecorder()
+	s.handleTriggerUpdate(w, req)
+
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+}
+
+// ---------------------------------------------------------------------------
+// Additional handler coverage
+// ---------------------------------------------------------------------------
+
+func TestHandleContainerDetail_Success(t *testing.T) {
+	s, mockDocker := newTestServer(t, "")
+	mockDocker.EXPECT().InspectContainer(mock.Anything, "abc123").Return(&docker.ContainerInfo{
+		ID: "abc123def456", Name: "nginx", Image: "nginx:latest", State: "running",
+	}, nil)
+
+	req := httptest.NewRequest("GET", "/api/containers/abc123", nil)
+	req.SetPathValue("id", "abc123")
+	w := httptest.NewRecorder()
+	s.handleContainerDetail(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestHandleContainerDetail_NotFound(t *testing.T) {
+	s, mockDocker := newTestServer(t, "")
+	mockDocker.EXPECT().InspectContainer(mock.Anything, "notfound").Return(nil, errors.New("not found"))
+
+	req := httptest.NewRequest("GET", "/api/containers/notfound", nil)
+	req.SetPathValue("id", "notfound")
+	w := httptest.NewRecorder()
+	s.handleContainerDetail(w, req)
+
+	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
+func TestHandleAuditLog_ContainerFilter(t *testing.T) {
+	s, _ := newTestServer(t, "")
+	// Add some audit entries
+	al := s.updater.AuditLog()
+	al.Record(audit.Entry{Type: audit.EventUpdateApplied, ContainerName: "nginx"})
+	al.Record(audit.Entry{Type: audit.EventUpdateFailed, ContainerName: "redis"})
+
+	req := httptest.NewRequest("GET", "/api/audit?container=nginx&limit=10", nil)
+	w := httptest.NewRecorder()
+	s.handleAuditLog(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	var entries []map[string]interface{}
+	_ = json.Unmarshal(w.Body.Bytes(), &entries)
+	assert.Len(t, entries, 1)
+}

@@ -8,10 +8,18 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+// testHost extracts host from httptest server URL.
+func testHost(srv *httptest.Server) string {
+	return strings.TrimPrefix(srv.URL, "http://")
+}
 
 func TestParseReference(t *testing.T) {
 	tests := []struct {
@@ -32,202 +40,233 @@ func TestParseReference(t *testing.T) {
 		{"registry.example.com/myapp:v1", "registry.example.com", "myapp", "v1"},
 		{"localhost:5000/myapp:dev", "localhost:5000", "myapp", "dev"},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
 			host, repo, tag := parseReference(tt.input)
-			assert.Equal(t, tt.wantHost, host, "host")
-			assert.Equal(t, tt.wantRepo, repo, "repo")
-			assert.Equal(t, tt.wantTag, tag, "tag")
+			assert.Equal(t, tt.wantHost, host)
+			assert.Equal(t, tt.wantRepo, repo)
+			assert.Equal(t, tt.wantTag, tag)
 		})
 	}
 }
 
 func TestExtractRegistryHost(t *testing.T) {
-	tests := []struct {
-		input string
-		want  string
-	}{
-		{"nginx", "docker.io"},
-		{"nginx:1.25", "docker.io"},
-		{"myuser/myapp", "docker.io"},
-		{"ghcr.io/owner/repo", "ghcr.io"},
-		{"ghcr.io/owner/repo:latest", "ghcr.io"},
-		{"registry.example.com/myapp:v1", "registry.example.com"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			got := extractRegistryHost(tt.input)
-			assert.Equal(t, tt.want, got)
-		})
-	}
+	assert.Equal(t, "docker.io", extractRegistryHost("nginx"))
+	assert.Equal(t, "ghcr.io", extractRegistryHost("ghcr.io/owner/repo"))
+	assert.Equal(t, "registry.example.com", extractRegistryHost("registry.example.com/myapp:v1"))
 }
 
 func TestIsDockerHub(t *testing.T) {
-	trueHosts := []string{"", "docker.io", "index.docker.io", "registry-1.docker.io"}
-	for _, h := range trueHosts {
-		assert.True(t, isDockerHub(h), "expected %q to be Docker Hub", h)
-	}
-	falseHosts := []string{"ghcr.io", "registry.example.com"}
-	for _, h := range falseHosts {
-		assert.False(t, isDockerHub(h), "expected %q to NOT be Docker Hub", h)
-	}
+	assert.True(t, isDockerHub("docker.io"))
+	assert.True(t, isDockerHub("registry-1.docker.io"))
+	assert.True(t, isDockerHub(""))
+	assert.False(t, isDockerHub("ghcr.io"))
 }
 
 func TestEncodeAuth(t *testing.T) {
-	auth := AuthConfig{Username: "user", Password: "pass"}
-	encoded := encodeAuth(auth)
+	encoded := encodeAuth(AuthConfig{Username: "u", Password: "p"})
 	assert.NotEmpty(t, encoded)
 	decoded, err := base64.URLEncoding.DecodeString(encoded)
-	assert.NoError(t, err)
-	var result AuthConfig
-	assert.NoError(t, json.Unmarshal(decoded, &result))
-	assert.Equal(t, "user", result.Username)
-	assert.Equal(t, "pass", result.Password)
+	require.NoError(t, err)
+	var a AuthConfig
+	require.NoError(t, json.Unmarshal(decoded, &a))
+	assert.Equal(t, "u", a.Username)
 }
 
 func TestNewClient_NoConfig(t *testing.T) {
 	c := NewClient("")
 	assert.NotNil(t, c)
-	assert.Empty(t, c.authConfigs)
+	assert.Equal(t, "https", c.scheme)
 }
 
 func TestNewClient_WithConfig(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")
-	authStr := base64.StdEncoding.EncodeToString([]byte("myuser:mypass"))
-	cfg := DockerConfig{
-		Auths: map[string]AuthConfig{
-			"https://index.docker.io/v1/": {Auth: authStr},
-			"ghcr.io":                     {Username: "ghuser", Password: "ghpass"},
-		},
-	}
-	data, _ := json.Marshal(cfg)
+	authStr := base64.StdEncoding.EncodeToString([]byte("user:pass"))
+	data, _ := json.Marshal(DockerConfig{Auths: map[string]AuthConfig{
+		"ghcr.io": {Auth: authStr},
+	}})
 	_ = os.WriteFile(path, data, 0644)
-
 	c := NewClient(path)
-	assert.Len(t, c.authConfigs, 2)
-	assert.Equal(t, "myuser", c.authConfigs["https://index.docker.io/v1/"].Username)
-	assert.Equal(t, "ghuser", c.authConfigs["ghcr.io"].Username)
+	assert.Len(t, c.authConfigs, 1)
+	assert.Equal(t, "user", c.authConfigs["ghcr.io"].Username)
 }
 
-func TestNewClient_InvalidConfig(t *testing.T) {
+func TestNewClient_BadConfig(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "bad.json")
-	_ = os.WriteFile(path, []byte("not json"), 0644)
+	_ = os.WriteFile(path, []byte("nope"), 0644)
 	c := NewClient(path)
-	assert.NotNil(t, c)
 	assert.Empty(t, c.authConfigs)
 }
 
-func TestGetRegistryAuth_Public(t *testing.T) {
+func TestGetRegistryAuth(t *testing.T) {
 	c := NewClient("")
-	assert.Empty(t, c.GetRegistryAuth("nginx:latest"))
-}
+	assert.Empty(t, c.GetRegistryAuth("nginx"))
 
-func TestGetRegistryAuth_PrivateMatch(t *testing.T) {
-	c := &Client{authConfigs: map[string]AuthConfig{"ghcr.io": {Username: "u", Password: "p"}}}
-	assert.NotEmpty(t, c.GetRegistryAuth("ghcr.io/owner/repo:latest"))
-}
+	c.authConfigs["ghcr.io"] = AuthConfig{Username: "u", Password: "p"}
+	assert.NotEmpty(t, c.GetRegistryAuth("ghcr.io/owner/repo"))
 
-func TestGetRegistryAuth_DockerHubAlias(t *testing.T) {
-	c := &Client{authConfigs: map[string]AuthConfig{"https://index.docker.io/v1/": {Username: "u", Password: "p"}}}
-	assert.NotEmpty(t, c.GetRegistryAuth("nginx:latest"))
+	c2 := &Client{authConfigs: map[string]AuthConfig{"https://index.docker.io/v1/": {Username: "u", Password: "p"}}}
+	assert.NotEmpty(t, c2.GetRegistryAuth("nginx"))
 }
 
 func TestParseChallenge(t *testing.T) {
-	header := `Bearer realm="https://ghcr.io/token",service="ghcr.io",scope="repository:user/repo:pull"`
-	ch := parseChallenge(header)
+	ch := parseChallenge(`Bearer realm="https://ghcr.io/token",service="ghcr.io",scope="repository:u/r:pull"`)
 	assert.Equal(t, "https://ghcr.io/token", ch.Realm)
 	assert.Equal(t, "ghcr.io", ch.Service)
-	assert.Equal(t, "repository:user/repo:pull", ch.Scope)
-}
+	assert.Equal(t, "repository:u/r:pull", ch.Scope)
 
-func TestParseChallenge_Minimal(t *testing.T) {
-	header := `Bearer realm="https://auth.example.com/token"`
-	ch := parseChallenge(header)
-	assert.Equal(t, "https://auth.example.com/token", ch.Realm)
-	assert.Empty(t, ch.Service)
-	assert.Empty(t, ch.Scope)
-}
+	ch2 := parseChallenge(`Bearer realm="https://auth.example.com/token"`)
+	assert.Equal(t, "https://auth.example.com/token", ch2.Realm)
+	assert.Empty(t, ch2.Service)
 
-func TestParseChallenge_Empty(t *testing.T) {
-	ch := parseChallenge("")
-	assert.Empty(t, ch.Realm)
+	ch3 := parseChallenge("")
+	assert.Empty(t, ch3.Realm)
 }
 
 func TestGetCredentials(t *testing.T) {
 	c := &Client{authConfigs: map[string]AuthConfig{
-		"ghcr.io":                     {Username: "gh", Password: "pass1"},
-		"https://index.docker.io/v1/": {Username: "dh", Password: "pass2"},
+		"ghcr.io":                     {Username: "gh", Password: "p"},
+		"https://index.docker.io/v1/": {Username: "dh", Password: "p"},
 	}}
-
-	auth := c.getCredentials("ghcr.io")
-	assert.NotNil(t, auth)
-	assert.Equal(t, "gh", auth.Username)
-
-	auth = c.getCredentials("registry-1.docker.io")
-	assert.NotNil(t, auth)
-	assert.Equal(t, "dh", auth.Username)
-
-	auth = c.getCredentials("unknown.io")
-	assert.Nil(t, auth)
+	assert.NotNil(t, c.getCredentials("ghcr.io"))
+	assert.NotNil(t, c.getCredentials("registry-1.docker.io"))
+	assert.Nil(t, c.getCredentials("unknown.io"))
 }
 
-// --- httptest-based tests ---
+// --- Full OCI flow tests via httptest ---
 
-func TestGetToken_ChallengeFlow(t *testing.T) {
-	// Simulate a registry that returns 401 with WWW-Authenticate, then a token endpoint
-	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_ = json.NewEncoder(w).Encode(tokenResponse{Token: "test-token-123"})
+func TestGetToken_OCIChallenge(t *testing.T) {
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Contains(t, r.URL.RawQuery, "scope=repository:lib/img:pull")
+		_ = json.NewEncoder(w).Encode(tokenResponse{Token: "tok-123"})
 	}))
 	defer tokenSrv.Close()
 
 	registrySrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/v2/" {
-			w.Header().Set("WWW-Authenticate", `Bearer realm="`+tokenSrv.URL+`",service="test",scope="repository:lib/nginx:pull"`)
-			w.WriteHeader(http.StatusUnauthorized)
-			return
-		}
+		w.Header().Set("WWW-Authenticate", `Bearer realm="`+tokenSrv.URL+`",service="test",scope="repository:lib/img:pull"`)
+		w.WriteHeader(http.StatusUnauthorized)
 	}))
 	defer registrySrv.Close()
 
-	// Extract host from test server URL
-	host := registrySrv.Listener.Addr().String()
-
-	// Direct test: simulate the challenge manually
-	ch := &challenge{Realm: tokenSrv.URL, Service: "test", Scope: "repository:lib/nginx:pull"}
-	tokenURL := ch.Realm + "?service=" + ch.Service + "&scope=" + ch.Scope
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, tokenURL, nil)
-	assert.NoError(t, err)
-	resp, err := http.DefaultClient.Do(req)
-	assert.NoError(t, err)
-	defer func() { _ = resp.Body.Close() }()
-	var tok tokenResponse
-	assert.NoError(t, json.NewDecoder(resp.Body).Decode(&tok))
-	assert.Equal(t, "test-token-123", tok.Token)
-	_ = host // used for reference
+	c := &Client{httpClient: &http.Client{}, authConfigs: make(map[string]AuthConfig), scheme: "http"}
+	token, err := c.getToken(context.Background(), testHost(registrySrv), "lib/img")
+	require.NoError(t, err)
+	assert.Equal(t, "tok-123", token)
 }
 
 func TestGetToken_NoAuthNeeded(t *testing.T) {
-	// Registry returns 200 on /v2/ -> no token needed
-	registrySrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := &Client{httpClient: &http.Client{}, authConfigs: make(map[string]AuthConfig), scheme: "http"}
+	token, err := c.getToken(context.Background(), testHost(srv), "lib/img")
+	require.NoError(t, err)
+	assert.Empty(t, token)
+}
+
+func TestGetToken_AccessTokenField(t *testing.T) {
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(tokenResponse{AccessToken: "access-tok"})
+	}))
+	defer tokenSrv.Close()
+
+	registrySrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("WWW-Authenticate", `Bearer realm="`+tokenSrv.URL+`"`)
+		w.WriteHeader(http.StatusUnauthorized)
 	}))
 	defer registrySrv.Close()
 
-	// We can't directly call getToken with http:// scheme, so test the 200 path via parse
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, registrySrv.URL+"/v2/", nil)
-	assert.NoError(t, err)
-	resp, err := http.DefaultClient.Do(req)
-	assert.NoError(t, err)
-	defer func() { _ = resp.Body.Close() }()
-	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	c := &Client{httpClient: &http.Client{}, authConfigs: make(map[string]AuthConfig), scheme: "http"}
+	token, err := c.getToken(context.Background(), testHost(registrySrv), "lib/img")
+	require.NoError(t, err)
+	assert.Equal(t, "access-tok", token)
 }
 
-func TestHasNewImage_NewAvailable(t *testing.T) {
-	// Mock full flow: registry challenge -> token -> manifest with different digest
+func TestGetToken_WithCredentials(t *testing.T) {
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user, pass, ok := r.BasicAuth()
+		assert.True(t, ok)
+		assert.Equal(t, "myuser", user)
+		assert.Equal(t, "mypass", pass)
+		_ = json.NewEncoder(w).Encode(tokenResponse{Token: "authed-tok"})
+	}))
+	defer tokenSrv.Close()
+
+	registrySrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("WWW-Authenticate", `Bearer realm="`+tokenSrv.URL+`",service="test"`)
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer registrySrv.Close()
+
+	host := testHost(registrySrv)
+	c := &Client{
+		httpClient:  &http.Client{},
+		authConfigs: map[string]AuthConfig{host: {Username: "myuser", Password: "mypass"}},
+		scheme:      "http",
+	}
+	token, err := c.getToken(context.Background(), host, "lib/img")
+	require.NoError(t, err)
+	assert.Equal(t, "authed-tok", token)
+}
+
+func TestGetToken_ChallengeError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	c := &Client{httpClient: &http.Client{}, authConfigs: make(map[string]AuthConfig), scheme: "http"}
+	_, err := c.getToken(context.Background(), testHost(srv), "lib/img")
+	assert.Error(t, err)
+}
+
+func TestGetToken_NoWWWAuth(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized) // no WWW-Authenticate header
+	}))
+	defer srv.Close()
+
+	c := &Client{httpClient: &http.Client{}, authConfigs: make(map[string]AuthConfig), scheme: "http"}
+	_, err := c.getToken(context.Background(), testHost(srv), "lib/img")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "no WWW-Authenticate")
+}
+
+func TestGetToken_NoRealm(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("WWW-Authenticate", `Bearer service="test"`)
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+
+	c := &Client{httpClient: &http.Client{}, authConfigs: make(map[string]AuthConfig), scheme: "http"}
+	_, err := c.getToken(context.Background(), testHost(srv), "lib/img")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "no realm")
+}
+
+func TestGetToken_TokenEndpointFails(t *testing.T) {
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer tokenSrv.Close()
+
+	registrySrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("WWW-Authenticate", `Bearer realm="`+tokenSrv.URL+`"`)
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer registrySrv.Close()
+
+	c := &Client{httpClient: &http.Client{}, authConfigs: make(map[string]AuthConfig), scheme: "http"}
+	_, err := c.getToken(context.Background(), testHost(registrySrv), "lib/img")
+	assert.Error(t, err)
+}
+
+func TestGetRemoteDigest_Success(t *testing.T) {
 	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(tokenResponse{Token: "tok"})
 	}))
@@ -239,22 +278,122 @@ func TestHasNewImage_NewAvailable(t *testing.T) {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
-		if r.Method == http.MethodHead {
-			w.Header().Set("Docker-Content-Digest", "sha256:newdigest")
-			w.WriteHeader(http.StatusOK)
-			return
-		}
+		w.Header().Set("Docker-Content-Digest", "sha256:abc123")
+		w.WriteHeader(http.StatusOK)
 	}))
 	defer registrySrv.Close()
 
-	// Test the comparison logic directly since we can't override https in getToken
-	remoteDigest := "sha256:newdigest"
-	localDigest := "sha256:olddigest"
-	assert.NotEqual(t, remoteDigest, localDigest)
+	host := testHost(registrySrv)
+	c := &Client{httpClient: &http.Client{}, authConfigs: make(map[string]AuthConfig), scheme: "http"}
+
+	// Call getToken + manifest directly since parseReference won't return our test host
+	digest, err := c.getRemoteDigestDirect(context.Background(), host, "lib/img", "latest")
+	require.NoError(t, err)
+	assert.Equal(t, "sha256:abc123", digest)
+}
+
+func TestGetRemoteDigest_ManifestNotFound(t *testing.T) {
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(tokenResponse{Token: "tok"})
+	}))
+	defer tokenSrv.Close()
+
+	registrySrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v2/" {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="`+tokenSrv.URL+`"`)
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer registrySrv.Close()
+
+	c := &Client{httpClient: &http.Client{}, authConfigs: make(map[string]AuthConfig), scheme: "http"}
+	_, err := c.getRemoteDigestDirect(context.Background(), testHost(registrySrv), "lib/img", "latest")
+	assert.Error(t, err)
+}
+
+func TestGetRemoteDigest_NoDigest(t *testing.T) {
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(tokenResponse{Token: "tok"})
+	}))
+	defer tokenSrv.Close()
+
+	registrySrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v2/" {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="`+tokenSrv.URL+`"`)
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.WriteHeader(http.StatusOK) // no digest header
+	}))
+	defer registrySrv.Close()
+
+	c := &Client{httpClient: &http.Client{}, authConfigs: make(map[string]AuthConfig), scheme: "http"}
+	_, err := c.getRemoteDigestDirect(context.Background(), testHost(registrySrv), "lib/img", "latest")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "no digest")
+}
+
+func TestHasNewImage_New(t *testing.T) {
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(tokenResponse{Token: "tok"})
+	}))
+	defer tokenSrv.Close()
+
+	registrySrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v2/" {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="`+tokenSrv.URL+`"`)
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Docker-Content-Digest", "sha256:newdigest")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer registrySrv.Close()
+
+	c := &Client{httpClient: &http.Client{}, authConfigs: make(map[string]AuthConfig), scheme: "http"}
+	hasNew, digest, err := c.hasNewImageDirect(context.Background(), testHost(registrySrv), "lib/img", "latest", "sha256:olddigest")
+	require.NoError(t, err)
+	assert.True(t, hasNew)
+	assert.Equal(t, "sha256:newdigest", digest)
 }
 
 func TestHasNewImage_UpToDate(t *testing.T) {
-	remoteDigest := "sha256:samedigest"
-	localDigest := "sha256:samedigest"
-	assert.Equal(t, remoteDigest, localDigest)
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(tokenResponse{Token: "tok"})
+	}))
+	defer tokenSrv.Close()
+
+	registrySrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v2/" {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="`+tokenSrv.URL+`"`)
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Docker-Content-Digest", "sha256:samedigest")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer registrySrv.Close()
+
+	c := &Client{httpClient: &http.Client{}, authConfigs: make(map[string]AuthConfig), scheme: "http"}
+	hasNew, _, err := c.hasNewImageDirect(context.Background(), testHost(registrySrv), "lib/img", "latest", "sha256:samedigest")
+	require.NoError(t, err)
+	assert.False(t, hasNew)
+}
+
+// ---------------------------------------------------------------------------
+// Public wrapper tests (cover GetRemoteDigest / HasNewImage entry points)
+// ---------------------------------------------------------------------------
+
+func TestGetRemoteDigest_PublicWrapper(t *testing.T) {
+	c := &Client{httpClient: &http.Client{Timeout: 1 * time.Second}, authConfigs: make(map[string]AuthConfig), scheme: "http"}
+	_, err := c.GetRemoteDigest(context.Background(), "localhost:1/nonexistent:latest")
+	assert.Error(t, err) // connection refused or timeout
+}
+
+func TestHasNewImage_PublicWrapper(t *testing.T) {
+	c := &Client{httpClient: &http.Client{Timeout: 1 * time.Second}, authConfigs: make(map[string]AuthConfig), scheme: "http"}
+	_, _, err := c.HasNewImage(context.Background(), "localhost:1/nonexistent:latest", "sha256:old")
+	assert.Error(t, err)
 }

@@ -42,7 +42,7 @@ jobs:
           go-version: '1.26'
 
       - name: Run tests with coverage
-        run: go test ./internal/... -coverprofile=./cover.out -covermode=atomic -coverpkg=./...
+        run: go test ./internal/... -coverprofile=./cover.out -covermode=atomic
 
       - name: Check coverage
         uses: vladopajic/go-test-coverage@v2

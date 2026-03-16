@@ -45,6 +45,10 @@ import (
 type Client struct {
 	httpClient  *http.Client
 	authConfigs map[string]AuthConfig // registry hostname -> credentials
+
+	// scheme is the URL scheme for registry requests ("https" in production).
+	// Overridable for testing with httptest servers.
+	scheme string
 }
 
 // AuthConfig holds credentials for a Docker registry.
@@ -66,6 +70,7 @@ func NewClient(configPath string) *Client {
 			Timeout: 30 * time.Second,
 		},
 		authConfigs: make(map[string]AuthConfig),
+		scheme:      "https",
 	}
 
 	if configPath != "" {
@@ -183,7 +188,7 @@ func parseChallenge(header string) *challenge {
 // This works for Docker Hub, GHCR, ECR, GCR, and any OCI-compliant registry.
 func (c *Client) getToken(ctx context.Context, registryHost, repo string) (string, error) {
 	// Step 1: Discover auth challenge by hitting the manifest endpoint
-	challengeURL := fmt.Sprintf("https://%s/v2/", registryHost)
+	challengeURL := fmt.Sprintf("%s://%s/v2/", c.scheme, registryHost)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, challengeURL, nil)
 	if err != nil {
 		return "", err
@@ -347,7 +352,12 @@ func parseReference(ref string) (host, repo, tag string) {
 // spec challenge-based auth flow. Works with any V2 registry.
 func (c *Client) GetRemoteDigest(ctx context.Context, imageRef string) (string, error) {
 	host, repo, tag := parseReference(imageRef)
+	return c.getRemoteDigestDirect(ctx, host, repo, tag)
+}
 
+// getRemoteDigestDirect fetches the digest for a specific host/repo/tag combination.
+// Extracted for testability so httptest servers can pass the host directly.
+func (c *Client) getRemoteDigestDirect(ctx context.Context, host, repo, tag string) (string, error) {
 	log.Debugf("Checking remote digest for %s/%s:%s", host, repo, tag)
 
 	token, err := c.getToken(ctx, host, repo)
@@ -355,7 +365,7 @@ func (c *Client) GetRemoteDigest(ctx context.Context, imageRef string) (string, 
 		return "", fmt.Errorf("getting auth token for %s/%s: %w", host, repo, err)
 	}
 
-	url := fmt.Sprintf("https://%s/v2/%s/manifests/%s", host, repo, tag)
+	url := fmt.Sprintf("%s://%s/v2/%s/manifests/%s", c.scheme, host, repo, tag)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodHead, url, nil)
 	if err != nil {
@@ -389,13 +399,19 @@ func (c *Client) GetRemoteDigest(ctx context.Context, imageRef string) (string, 
 // HasNewImage compares the remote registry digest with the local digest to
 // determine if a newer image is available.
 func (c *Client) HasNewImage(ctx context.Context, imageRef string, localDigest string) (bool, string, error) {
-	remoteDigest, err := c.GetRemoteDigest(ctx, imageRef)
+	host, repo, tag := parseReference(imageRef)
+	return c.hasNewImageDirect(ctx, host, repo, tag, localDigest)
+}
+
+// hasNewImageDirect compares digests for a specific host/repo/tag.
+func (c *Client) hasNewImageDirect(ctx context.Context, host, repo, tag, localDigest string) (bool, string, error) {
+	remoteDigest, err := c.getRemoteDigestDirect(ctx, host, repo, tag)
 	if err != nil {
 		return false, "", err
 	}
 
 	if remoteDigest != localDigest && !strings.Contains(localDigest, remoteDigest) {
-		log.Infof("New image available for %s: remote=%s local=%s", imageRef, remoteDigest, localDigest)
+		log.Infof("New image available for %s/%s:%s: remote=%s local=%s", host, repo, tag, remoteDigest, localDigest)
 		return true, remoteDigest, nil
 	}
 

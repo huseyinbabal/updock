@@ -5,8 +5,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/mock"
+
 	"github.com/huseyinbabal/updock/internal/audit"
 	"github.com/huseyinbabal/updock/internal/config"
+	"github.com/huseyinbabal/updock/internal/docker"
+	"github.com/huseyinbabal/updock/internal/mocks"
 	"github.com/huseyinbabal/updock/internal/policy"
 	"github.com/huseyinbabal/updock/internal/updater"
 )
@@ -99,4 +103,55 @@ func TestStop_NilCron(t *testing.T) {
 	s := New(u, 1*time.Hour, "")
 	// Stop without Start - cronJob is nil
 	s.Stop()
+}
+
+func newMockUpdater(t *testing.T) *updater.Updater {
+	mockDocker := mocks.NewMockDockerClient(t)
+	mockDocker.EXPECT().ListContainers(mock.Anything, false, false).Return([]docker.ContainerInfo{}, nil).Maybe()
+	cfg := &config.Config{MonitorAll: true}
+	return updater.New(mockDocker, nil, nil, cfg, policy.DefaultSpec(), audit.NewLog(""))
+}
+
+func TestStart_IntervalMode(t *testing.T) {
+	u := newMockUpdater(t)
+	s := New(u, 1*time.Hour, "")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	err := s.Start(ctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	time.Sleep(50 * time.Millisecond) // let initial goroutine run
+	s.Stop()
+}
+
+func TestStart_CronMode(t *testing.T) {
+	u := newMockUpdater(t)
+	s := New(u, 0, "0 0 1 1 * *") // far-future cron
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	err := s.Start(ctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	s.Stop()
+}
+
+func TestStart_CronInvalid(t *testing.T) {
+	u := newMockUpdater(t)
+	s := New(u, 0, "bad cron expr")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	err := s.Start(ctx)
+	if err == nil {
+		t.Error("expected error for invalid cron expression")
+		s.Stop()
+	}
 }
