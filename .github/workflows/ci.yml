@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  contents: read
+  contents: write
   pull-requests: write
 
 jobs:
@@ -32,114 +32,36 @@ jobs:
         run: golangci-lint run ./...
 
   test:
-    name: Test
+    name: Test & Coverage
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 10
 
       - uses: actions/setup-go@v5
         with:
           go-version: '1.26'
 
-      - name: Install gcov2lcov
-        run: go install github.com/jandelgado/gcov2lcov@latest
-
-      - name: Run tests with coverage
-        run: |
-          go test -race -coverprofile=coverage.out -covermode=atomic \
-            $(go list ./internal/... | grep -v /mocks)
-
-      - name: Check coverage threshold
-        run: |
-          grep -v '/mocks/' coverage.out | grep -v 'internal/docker/client.go' > coverage-filtered.out
-          COVERAGE=$(go tool cover -func=coverage-filtered.out | grep ^total | awk '{print $3}' | tr -d '%')
-          echo "Coverage (excluding mocks & docker daemon): ${COVERAGE}%"
-          THRESHOLD=80
-          if [ "$(echo "$COVERAGE < $THRESHOLD" | bc -l)" -eq 1 ]; then
-            echo "::error::Coverage ${COVERAGE}% is below threshold ${THRESHOLD}%"
-            exit 1
-          fi
+      - uses: gwatts/go-coverage-action@v2
+        id: coverage
+        with:
+          coverage-threshold: 80
+          cover-pkg: ./...
+          ignore-pattern: |
+            \/mocks\/
+            \/docker\/client\.go$
 
       - name: Update coverage badge
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-        env:
-          GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
-        run: |
-          if [ -z "$GIST_TOKEN" ]; then echo "GIST_TOKEN not set, skipping badge update"; exit 0; fi
-          COVERAGE=${{ steps.coverage.outputs.coverage }}
-          COLOR="red"
-          if [ "$(echo "$COVERAGE >= 90" | bc -l)" -eq 1 ]; then COLOR="brightgreen"
-          elif [ "$(echo "$COVERAGE >= 80" | bc -l)" -eq 1 ]; then COLOR="green"
-          elif [ "$(echo "$COVERAGE >= 70" | bc -l)" -eq 1 ]; then COLOR="yellow"
-          elif [ "$(echo "$COVERAGE >= 60" | bc -l)" -eq 1 ]; then COLOR="orange"; fi
-          curl -sf -X PATCH \
-            -H "Authorization: token $GIST_TOKEN" \
-            -d "{\"files\":{\"updock-coverage.json\":{\"content\":\"{\\\"schemaVersion\\\":1,\\\"label\\\":\\\"coverage\\\",\\\"message\\\":\\\"${COVERAGE}%\\\",\\\"color\\\":\\\"${COLOR}\\\"}\"}}}" \
-            "https://api.github.com/gists/e1cdde41155f750c6d0e71f544df4f17"
-
-      - name: Convert coverage to LCOV
-        run: gcov2lcov -infile coverage.out -outfile lcov.info
-
-      - name: Upload coverage artifact
-        uses: actions/upload-artifact@v4
+        if: github.ref_name == 'main' && github.event_name == 'push'
+        uses: schneegans/dynamic-badges-action@v1.7.0
         with:
-          name: lcov
-          path: lcov.info
-
-  base-coverage:
-    name: Base Coverage
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.base_ref }}
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.26'
-
-      - name: Install gcov2lcov
-        run: go install github.com/jandelgado/gcov2lcov@latest
-
-      - name: Run base branch tests with coverage
-        run: |
-          go test -coverprofile=coverage.out -covermode=atomic \
-            $(go list ./internal/... | grep -v /mocks) || true
-
-      - name: Convert to LCOV
-        run: gcov2lcov -infile coverage.out -outfile base-lcov.info || true
-
-      - name: Upload base coverage
-        uses: actions/upload-artifact@v4
-        with:
-          name: base-lcov
-          path: base-lcov.info
-
-  coverage-report:
-    name: Coverage Report
-    if: github.event_name == 'pull_request'
-    needs: [test, base-coverage]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: lcov
-          path: .
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: base-lcov
-          path: .
-
-      - name: Barecheck coverage report
-        uses: barecheck/code-coverage-action@v1
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          lcov-file: ./lcov.info
-          base-lcov-file: ./base-lcov.info
-          send-summary-comment: true
-          show-annotations: warning
+          auth: ${{ secrets.GIST_TOKEN }}
+          gistID: e1cdde41155f750c6d0e71f544df4f17
+          filename: updock-coverage.json
+          label: coverage
+          message: ${{ steps.coverage.outputs.coverage-pct-1dp }}%
+          color: ${{ steps.coverage.outputs.meets-threshold == 'true' && 'green' || 'red' }}
 
   build:
     name: Build
