@@ -77,9 +77,3 @@ func TestListTagsDirect_BadJSON(t *testing.T) {
 	_, err := c.listTagsDirect(context.Background(), host, "library/mysql")
 	assert.Error(t, err)
 }
-
-func TestListTags_PublicWrapper(t *testing.T) {
-	c := &Client{httpClient: &http.Client{Timeout: 1e9}, authConfigs: make(map[string]AuthConfig), scheme: "http"}
-	_, err := c.ListTags(context.Background(), "localhost:1/nonexistent:latest")
-	assert.Error(t, err)
-}

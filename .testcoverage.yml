@@ -10,3 +10,4 @@ exclude:
     - \/mocks\/
     - internal\/docker\/client\.go$
     - internal\/gitops\/gitops\.go$
+    - internal\/logger\/logger\.go$

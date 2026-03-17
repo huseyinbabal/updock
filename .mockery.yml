@@ -6,3 +6,10 @@ packages:
           dir: "internal/mocks"
           filename: "mock_docker_client.go"
           inpackage: false
+  github.com/huseyinbabal/updock/internal/registry:
+    interfaces:
+      RegistryClient:
+        config:
+          dir: "internal/mocks"
+          filename: "mock_registry_client.go"
+          inpackage: false

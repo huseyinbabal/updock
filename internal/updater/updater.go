@@ -68,7 +68,7 @@ type UpdateResult struct {
 // It is safe for concurrent use.
 type Updater struct {
 	docker   docker.DockerClient
-	registry *registry.Client
+	registry registry.RegistryClient
 	notifier *notification.Notifier
 	cfg      *config.Config
 	spec     *policy.Spec
@@ -81,7 +81,7 @@ type Updater struct {
 // New creates a new Updater with the given dependencies.
 // The policy spec and audit log enable Updock's declarative policy engine
 // and compliance-grade audit trail.
-func New(dockerClient docker.DockerClient, registryClient *registry.Client, notifier *notification.Notifier, cfg *config.Config, spec *policy.Spec, auditLog *audit.Log) *Updater {
+func New(dockerClient docker.DockerClient, registryClient registry.RegistryClient, notifier *notification.Notifier, cfg *config.Config, spec *policy.Spec, auditLog *audit.Log) *Updater {
 	return &Updater{
 		docker:   dockerClient,
 		registry: registryClient,

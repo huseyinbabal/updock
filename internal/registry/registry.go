@@ -41,7 +41,25 @@ import (
 	"github.com/huseyinbabal/updock/internal/logger"
 )
 
+// RegistryClient defines the interface for all registry operations that Updock needs.
+// This interface enables mock-based testing of the updater, API, and scheduler
+// without hitting real Docker registries.
+type RegistryClient interface {
+	// GetRemoteDigest fetches the remote image digest via HEAD request.
+	GetRemoteDigest(ctx context.Context, imageRef string) (string, error)
+
+	// HasNewImage checks if a newer image exists compared to the local digest.
+	HasNewImage(ctx context.Context, imageRef string, localDigest string) (bool, string, error)
+
+	// ListTags returns all tags for a given image reference from the registry.
+	ListTags(ctx context.Context, imageRef string) ([]string, error)
+
+	// GetRegistryAuth returns base64-encoded auth config for the Docker pull API.
+	GetRegistryAuth(imageRef string) string
+}
+
 // Client checks remote registries for image updates.
+// It implements the [RegistryClient] interface.
 type Client struct {
 	httpClient  *http.Client
 	authConfigs map[string]AuthConfig // registry hostname -> credentials
@@ -50,6 +68,9 @@ type Client struct {
 	// Overridable for testing with httptest servers.
 	scheme string
 }
+
+// Compile-time check that Client implements RegistryClient.
+var _ RegistryClient = (*Client)(nil)
 
 // AuthConfig holds credentials for a Docker registry.
 type AuthConfig struct {

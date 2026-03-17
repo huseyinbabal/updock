@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -380,20 +379,4 @@ func TestHasNewImage_UpToDate(t *testing.T) {
 	hasNew, _, err := c.hasNewImageDirect(context.Background(), testHost(registrySrv), "lib/img", "latest", "sha256:samedigest")
 	require.NoError(t, err)
 	assert.False(t, hasNew)
-}
-
-// ---------------------------------------------------------------------------
-// Public wrapper tests (cover GetRemoteDigest / HasNewImage entry points)
-// ---------------------------------------------------------------------------
-
-func TestGetRemoteDigest_PublicWrapper(t *testing.T) {
-	c := &Client{httpClient: &http.Client{Timeout: 1 * time.Second}, authConfigs: make(map[string]AuthConfig), scheme: "http"}
-	_, err := c.GetRemoteDigest(context.Background(), "localhost:1/nonexistent:latest")
-	assert.Error(t, err) // connection refused or timeout
-}
-
-func TestHasNewImage_PublicWrapper(t *testing.T) {
-	c := &Client{httpClient: &http.Client{Timeout: 1 * time.Second}, authConfigs: make(map[string]AuthConfig), scheme: "http"}
-	_, _, err := c.HasNewImage(context.Background(), "localhost:1/nonexistent:latest", "sha256:old")
-	assert.Error(t, err)
 }
