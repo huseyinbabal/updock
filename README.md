@@ -52,4 +52,4 @@ Full docs at [huseyinbabal.github.io/updock](https://huseyinbabal.github.io/updo
 
 ## License
 
-Apache-2.0
+MIT
