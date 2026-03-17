@@ -549,6 +549,8 @@ func (u *Updater) findNewerTag(ctx context.Context, imageRef string, strategy st
 		return "", false, fmt.Errorf("listing tags: %w", err)
 	}
 
+	log.Debugf("Found %d tags for %s, current=%s strategy=%s", len(tags), imageRef, currentVer.Original, strategy)
+
 	// Parse all tags as semver, filter invalid ones
 	var candidates []semver.Version
 	for _, tag := range tags {
@@ -559,9 +561,12 @@ func (u *Updater) findNewerTag(ctx context.Context, imageRef string, strategy st
 		candidates = append(candidates, v)
 	}
 
+	log.Debugf("Parsed %d semver candidates from %d tags for %s", len(candidates), len(tags), imageRef)
+
 	// Find best candidate by strategy
 	best := semver.FilterByStrategy(currentVer, candidates, strategy)
 	if best == nil {
+		log.Debugf("No newer version found for %s with strategy=%s", imageRef, strategy)
 		return "", false, nil // no newer version found
 	}
 
