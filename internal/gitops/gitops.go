@@ -35,7 +35,7 @@ import (
 	"text/template"
 	"time"
 
-	log "github.com/sirupsen/logrus"
+	"github.com/huseyinbabal/updock/internal/logger"
 )
 
 // Config holds GitOps configuration from updock.yml.
@@ -102,7 +102,7 @@ func (c *Client) PushChange(change Change) error {
 	repoPath := c.cfg.Repository
 	filePath := c.cfg.File
 
-	log.Infof("GitOps: updating %s in %s/%s", change.NewRef, repoPath, filePath)
+	logger.Info().Msgf("GitOps: updating %s in %s/%s", change.NewRef, repoPath, filePath)
 
 	// Step 1: Read the file
 	fullPath := repoPath + "/" + filePath
@@ -115,7 +115,7 @@ func (c *Client) PushChange(change Change) error {
 	content := string(data)
 	newContent := strings.ReplaceAll(content, change.OldRef, change.NewRef)
 	if content == newContent {
-		log.Warnf("GitOps: old reference %q not found in %s, skipping", change.OldRef, filePath)
+		logger.Warn().Msgf("GitOps: old reference %q not found in %s, skipping", change.OldRef, filePath)
 		return nil
 	}
 
@@ -148,7 +148,7 @@ func (c *Client) PushChange(change Change) error {
 		}
 	}
 
-	log.Infof("GitOps: pushed %s -> %s to %s:%s", change.OldRef, change.NewRef, repoPath, c.cfg.Branch)
+	logger.Info().Msgf("GitOps: pushed %s -> %s to %s:%s", change.OldRef, change.NewRef, repoPath, c.cfg.Branch)
 	return nil
 }
 

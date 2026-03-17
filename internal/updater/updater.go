@@ -40,12 +40,12 @@ import (
 	"github.com/huseyinbabal/updock/internal/config"
 	"github.com/huseyinbabal/updock/internal/docker"
 	"github.com/huseyinbabal/updock/internal/gitops"
+	"github.com/huseyinbabal/updock/internal/logger"
 	"github.com/huseyinbabal/updock/internal/metrics"
 	"github.com/huseyinbabal/updock/internal/notification"
 	"github.com/huseyinbabal/updock/internal/policy"
 	"github.com/huseyinbabal/updock/internal/registry"
 	"github.com/huseyinbabal/updock/internal/semver"
-	log "github.com/sirupsen/logrus"
 )
 
 // UpdateResult represents the outcome of an update check for a single container.
@@ -102,7 +102,7 @@ func (u *Updater) AuditLog() *audit.Log {
 // and apply them if configured to do so. Returns a slice of results for each
 // container that was checked.
 func (u *Updater) Run(ctx context.Context) ([]UpdateResult, error) {
-	log.Info("Starting update check cycle")
+	logger.Info().Msg("Starting update check cycle")
 	start := time.Now()
 	defer func() {
 		metrics.CheckDuration.Observe(time.Since(start).Seconds())
@@ -117,7 +117,7 @@ func (u *Updater) Run(ctx context.Context) ([]UpdateResult, error) {
 	var toUpdate []docker.ContainerInfo
 	for _, ctr := range containers {
 		if !u.shouldMonitor(ctr) {
-			log.Debugf("Skipping container %s (not monitored)", ctr.Name)
+			logger.Debug().Msgf("Skipping container %s (not monitored)", ctr.Name)
 			continue
 		}
 		toUpdate = append(toUpdate, ctr)
@@ -166,7 +166,7 @@ func (u *Updater) Run(ctx context.Context) ([]UpdateResult, error) {
 
 	metrics.ContainersScanned.Set(float64(len(results)))
 
-	log.Infof("Update check cycle complete: %d containers checked", len(results))
+	logger.Info().Msgf("Update check cycle complete: %d containers checked", len(results))
 	return results, nil
 }
 
@@ -315,26 +315,26 @@ func (u *Updater) checkAndUpdate(ctx context.Context, ctr docker.ContainerInfo) 
 		if strategyStr == "patch" || strategyStr == "minor" || strategyStr == "major" {
 			newTag, found, err := u.findNewerTag(ctx, ctr.Image, strategyStr)
 			if err != nil {
-				log.Debugf("Semver tag discovery failed for %s, falling back to digest check: %v", ctr.Name, err)
+				logger.Debug().Msgf("Semver tag discovery failed for %s, falling back to digest check: %v", ctr.Name, err)
 			} else if found {
 				newImageRef = newTag
-				log.Infof("Semver upgrade found for %s: %s -> %s", ctr.Name, ctr.Image, newTag)
+				logger.Info().Msgf("Semver upgrade found for %s: %s -> %s", ctr.Name, ctr.Image, newTag)
 			} else {
 				// No newer semver tag found; also check digest for same tag
 				localDigest, err := u.docker.GetImageDigest(ctx, ctr.ImageID)
 				if err != nil {
 					result.Error = fmt.Sprintf("getting local digest: %v", err)
-					log.Warnf("Error getting local digest for %s: %v", ctr.Name, err)
+					logger.Warn().Msgf("Error getting local digest for %s: %v", ctr.Name, err)
 					return result
 				}
 				hasNew, _, err := u.registry.HasNewImage(ctx, ctr.Image, localDigest)
 				if err != nil {
 					result.Error = fmt.Sprintf("checking remote: %v", err)
-					log.Warnf("Error checking remote for %s: %v", ctr.Name, err)
+					logger.Warn().Msgf("Error checking remote for %s: %v", ctr.Name, err)
 					return result
 				}
 				if !hasNew {
-					log.Debugf("Container %s is up to date", ctr.Name)
+					logger.Debug().Msgf("Container %s is up to date", ctr.Name)
 					return result
 				}
 			}
@@ -343,23 +343,23 @@ func (u *Updater) checkAndUpdate(ctx context.Context, ctr docker.ContainerInfo) 
 			localDigest, err := u.docker.GetImageDigest(ctx, ctr.ImageID)
 			if err != nil {
 				result.Error = fmt.Sprintf("getting local digest: %v", err)
-				log.Warnf("Error getting local digest for %s: %v", ctr.Name, err)
+				logger.Warn().Msgf("Error getting local digest for %s: %v", ctr.Name, err)
 				return result
 			}
 			hasNew, _, err := u.registry.HasNewImage(ctx, ctr.Image, localDigest)
 			if err != nil {
 				result.Error = fmt.Sprintf("checking remote: %v", err)
-				log.Warnf("Error checking remote for %s: %v", ctr.Name, err)
+				logger.Warn().Msgf("Error checking remote for %s: %v", ctr.Name, err)
 				return result
 			}
 			if !hasNew {
-				log.Debugf("Container %s is up to date", ctr.Name)
+				logger.Debug().Msgf("Container %s is up to date", ctr.Name)
 				return result
 			}
 		}
 	}
 
-	log.Infof("Update available for container %s (%s -> %s)", ctr.Name, ctr.Image, newImageRef)
+	logger.Info().Msgf("Update available for container %s (%s -> %s)", ctr.Name, ctr.Image, newImageRef)
 
 	// Record in audit log
 	if u.audit != nil {
@@ -377,7 +377,7 @@ func (u *Updater) checkAndUpdate(ctx context.Context, ctr docker.ContainerInfo) 
 	if u.spec != nil && !u.spec.IsInMaintenanceWindow(ctr.Name) {
 		result.Skipped = true
 		result.Error = "outside maintenance window"
-		log.Infof("[WINDOW] Skipping %s: outside maintenance window", ctr.Name)
+		logger.Info().Msgf("[WINDOW] Skipping %s: outside maintenance window", ctr.Name)
 		if u.audit != nil {
 			u.audit.Record(audit.Entry{
 				Type:          audit.EventUpdateSkipped,
@@ -396,7 +396,7 @@ func (u *Updater) checkAndUpdate(ctx context.Context, ctr docker.ContainerInfo) 
 		if pol.Strategy == policy.StrategyPin {
 			result.Skipped = true
 			result.Error = "policy: pinned, requires manual approval"
-			log.Infof("[POLICY] Skipping %s: pinned strategy", ctr.Name)
+			logger.Info().Msgf("[POLICY] Skipping %s: pinned strategy", ctr.Name)
 			if u.audit != nil {
 				u.audit.Record(audit.Entry{
 					Type:          audit.EventApprovalPending,
@@ -413,7 +413,7 @@ func (u *Updater) checkAndUpdate(ctx context.Context, ctr docker.ContainerInfo) 
 		if pol.Approve == policy.ApproveManual {
 			result.Skipped = true
 			result.Error = "policy: manual approval required"
-			log.Infof("[POLICY] Skipping %s: manual approval required", ctr.Name)
+			logger.Info().Msgf("[POLICY] Skipping %s: manual approval required", ctr.Name)
 			if u.audit != nil {
 				u.audit.Record(audit.Entry{
 					Type:          audit.EventApprovalPending,
@@ -431,7 +431,7 @@ func (u *Updater) checkAndUpdate(ctx context.Context, ctr docker.ContainerInfo) 
 	if u.isMonitorOnly(ctr) {
 		result.MonitorOnly = true
 		result.Error = "monitor-only mode, skipping update"
-		log.Infof("[MONITOR ONLY] Would update container %s", ctr.Name)
+		logger.Info().Msgf("[MONITOR ONLY] Would update container %s", ctr.Name)
 		if u.notifier != nil {
 			u.notifier.NotifyUpdate(result)
 		}
@@ -453,7 +453,7 @@ func (u *Updater) checkAndUpdate(ctx context.Context, ctr docker.ContainerInfo) 
 		newImageID, err := u.docker.PullImage(ctx, newImageRef, registryAuth)
 		if err != nil {
 			result.Error = fmt.Sprintf("pulling new image: %v", err)
-			log.Errorf("Error pulling image for %s: %v", ctr.Name, err)
+			logger.Error().Msgf("Error pulling image for %s: %v", ctr.Name, err)
 			return result
 		}
 		result.NewImageID = newImageID
@@ -463,7 +463,7 @@ func (u *Updater) checkAndUpdate(ctx context.Context, ctr docker.ContainerInfo) 
 	if u.cfg.NoRestart {
 		result.Updated = true
 		result.Error = "no-restart mode, image pulled but container not restarted"
-		log.Infof("[NO RESTART] Image pulled for %s but container not restarted", ctr.Name)
+		logger.Info().Msgf("[NO RESTART] Image pulled for %s but container not restarted", ctr.Name)
 		return result
 	}
 
@@ -482,12 +482,12 @@ func (u *Updater) checkAndUpdate(ctx context.Context, ctr docker.ContainerInfo) 
 	)
 	if err != nil {
 		result.Error = fmt.Sprintf("recreating container: %v", err)
-		log.Errorf("Error recreating container %s: %v", ctr.Name, err)
+		logger.Error().Msgf("Error recreating container %s: %v", ctr.Name, err)
 		return result
 	}
 
 	result.Updated = true
-	log.Infof("Successfully updated container %s -> %s (%s)", ctr.Name, newContainerID[:12], newImageRef)
+	logger.Info().Msgf("Successfully updated container %s -> %s (%s)", ctr.Name, newContainerID[:12], newImageRef)
 
 	// Execute post-update lifecycle hook
 	if u.cfg.LifecycleHooks {
@@ -498,7 +498,7 @@ func (u *Updater) checkAndUpdate(ctx context.Context, ctr docker.ContainerInfo) 
 	// Clean up old image if configured
 	if u.cfg.CleanupImages {
 		if err := u.docker.RemoveImage(ctx, ctr.ImageID); err != nil {
-			log.Warnf("Failed to remove old image %s: %v", ctr.ImageID, err)
+			logger.Warn().Msgf("Failed to remove old image %s: %v", ctr.ImageID, err)
 		}
 	}
 
@@ -512,7 +512,7 @@ func (u *Updater) checkAndUpdate(ctx context.Context, ctr docker.ContainerInfo) 
 			OldRef: ctr.Image,
 			NewRef: newImageRef,
 		}); err != nil {
-			log.Warnf("GitOps push failed for %s: %v", ctr.Name, err)
+			logger.Warn().Msgf("GitOps push failed for %s: %v", ctr.Name, err)
 		}
 	}
 
@@ -549,7 +549,7 @@ func (u *Updater) findNewerTag(ctx context.Context, imageRef string, strategy st
 		return "", false, fmt.Errorf("listing tags: %w", err)
 	}
 
-	log.Debugf("Found %d tags for %s, current=%s strategy=%s", len(tags), imageRef, currentVer.Original, strategy)
+	logger.Debug().Msgf("Found %d tags for %s, current=%s strategy=%s", len(tags), imageRef, currentVer.Original, strategy)
 
 	// Parse all tags as semver, filter invalid ones
 	var candidates []semver.Version
@@ -561,12 +561,12 @@ func (u *Updater) findNewerTag(ctx context.Context, imageRef string, strategy st
 		candidates = append(candidates, v)
 	}
 
-	log.Debugf("Parsed %d semver candidates from %d tags for %s", len(candidates), len(tags), imageRef)
+	logger.Debug().Msgf("Parsed %d semver candidates from %d tags for %s", len(candidates), len(tags), imageRef)
 
 	// Find best candidate by strategy
 	best := semver.FilterByStrategy(currentVer, candidates, strategy)
 	if best == nil {
-		log.Debugf("No newer version found for %s with strategy=%s", imageRef, strategy)
+		logger.Debug().Msgf("No newer version found for %s with strategy=%s", imageRef, strategy)
 		return "", false, nil // no newer version found
 	}
 
@@ -583,12 +583,12 @@ func (u *Updater) execLifecycleHook(ctx context.Context, ctr docker.ContainerInf
 		return
 	}
 
-	log.Infof("Executing %s hook for container %s: %s", label, ctr.Name, cmd)
+	logger.Info().Msgf("Executing %s hook for container %s: %s", label, ctr.Name, cmd)
 	output, err := u.docker.ExecCommand(ctx, ctr.ID, cmd, timeout)
 	if err != nil {
-		log.Errorf("Lifecycle hook %s failed for %s: %v (output: %s)", label, ctr.Name, err, output)
+		logger.Error().Msgf("Lifecycle hook %s failed for %s: %v (output: %s)", label, ctr.Name, err, output)
 	} else {
-		log.Debugf("Lifecycle hook %s output for %s: %s", label, ctr.Name, output)
+		logger.Debug().Msgf("Lifecycle hook %s output for %s: %s", label, ctr.Name, output)
 	}
 }
 
@@ -600,12 +600,12 @@ func (u *Updater) execLifecycleHookByID(ctx context.Context, containerID string,
 		return
 	}
 
-	log.Infof("Executing %s hook for container %s: %s", label, ctr.Name, cmd)
+	logger.Info().Msgf("Executing %s hook for container %s: %s", label, ctr.Name, cmd)
 	output, err := u.docker.ExecCommand(ctx, containerID, cmd, timeout)
 	if err != nil {
-		log.Errorf("Lifecycle hook %s failed for %s: %v (output: %s)", label, ctr.Name, err, output)
+		logger.Error().Msgf("Lifecycle hook %s failed for %s: %v (output: %s)", label, ctr.Name, err, output)
 	} else {
-		log.Debugf("Lifecycle hook %s output for %s: %s", label, ctr.Name, output)
+		logger.Debug().Msgf("Lifecycle hook %s output for %s: %s", label, ctr.Name, output)
 	}
 }
 

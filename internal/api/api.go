@@ -42,10 +42,10 @@ import (
 
 	"github.com/huseyinbabal/updock/internal/config"
 	"github.com/huseyinbabal/updock/internal/docker"
+	"github.com/huseyinbabal/updock/internal/logger"
 	"github.com/huseyinbabal/updock/internal/policy"
 	"github.com/huseyinbabal/updock/internal/updater"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	log "github.com/sirupsen/logrus"
 )
 
 // Server is the HTTP server that hosts the REST API and Web UI.
@@ -144,7 +144,7 @@ func (s *Server) Start() error {
 		IdleTimeout:  60 * time.Second,
 	}
 
-	log.Infof("Web UI available at http://0.0.0.0%s", s.cfg.HTTPAddr)
+	logger.Info().Msgf("Web UI available at http://0.0.0.0%s", s.cfg.HTTPAddr)
 	return s.server.ListenAndServe()
 }
 

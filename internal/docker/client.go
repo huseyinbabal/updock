@@ -44,7 +44,7 @@ import (
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/network"
 	dockerclient "github.com/docker/docker/client"
-	log "github.com/sirupsen/logrus"
+	"github.com/huseyinbabal/updock/internal/logger"
 )
 
 // DockerClient defines the interface for all Docker operations that Updock needs.
@@ -286,7 +286,7 @@ func (c *Client) InspectContainer(ctx context.Context, id string) (*ContainerInf
 // resulting local image ID. The registryAuth parameter is a base64-encoded
 // JSON auth config for private registries (empty string for public images).
 func (c *Client) PullImage(ctx context.Context, ref string, registryAuth string) (string, error) {
-	log.Infof("Pulling image: %s", ref)
+	logger.Info().Msgf("Pulling image: %s", ref)
 
 	pullOpts := image.PullOptions{}
 	if registryAuth != "" {
@@ -346,28 +346,28 @@ func (c *Client) StopContainer(ctx context.Context, id string, timeout time.Dura
 	if customSignal != "" {
 		sig := parseSignal(customSignal)
 		if sig != 0 {
-			log.Infof("Sending %s to container %s", customSignal, shortID(id))
+			logger.Info().Msgf("Sending %s to container %s", customSignal, shortID(id))
 			if err := c.api.ContainerKill(ctx, id, customSignal); err != nil {
-				log.Warnf("Failed to send custom signal %s: %v", customSignal, err)
+				logger.Warn().Msgf("Failed to send custom signal %s: %v", customSignal, err)
 			}
 		}
 	}
 
-	log.Infof("Stopping container: %s", shortID(id))
+	logger.Info().Msgf("Stopping container: %s", shortID(id))
 	timeoutSec := int(timeout.Seconds())
 	return c.api.ContainerStop(ctx, id, container.StopOptions{Timeout: &timeoutSec})
 }
 
 // StartContainer starts a stopped container.
 func (c *Client) StartContainer(ctx context.Context, id string) error {
-	log.Infof("Starting container: %s", shortID(id))
+	logger.Info().Msgf("Starting container: %s", shortID(id))
 	return c.api.ContainerStart(ctx, id, container.StartOptions{})
 }
 
 // RemoveContainer forcefully removes a container.
 // If removeVolumes is true, anonymous volumes attached to the container are also removed.
 func (c *Client) RemoveContainer(ctx context.Context, id string, removeVolumes bool) error {
-	log.Infof("Removing container: %s", shortID(id))
+	logger.Info().Msgf("Removing container: %s", shortID(id))
 	return c.api.ContainerRemove(ctx, id, container.RemoveOptions{
 		Force:         true,
 		RemoveVolumes: removeVolumes,
@@ -377,7 +377,7 @@ func (c *Client) RemoveContainer(ctx context.Context, id string, removeVolumes b
 // RemoveImage removes an image by ID or reference.
 // Child images are pruned automatically.
 func (c *Client) RemoveImage(ctx context.Context, imageID string) error {
-	log.Infof("Removing old image: %s", shortID(imageID))
+	logger.Info().Msgf("Removing old image: %s", shortID(imageID))
 	_, err := c.api.ImageRemove(ctx, imageID, image.RemoveOptions{PruneChildren: true})
 	return err
 }
@@ -396,7 +396,7 @@ func (c *Client) ExecCommand(ctx context.Context, containerID string, cmd string
 		defer cancel()
 	}
 
-	log.Debugf("Executing command in container %s: %s", shortID(containerID), cmd)
+	logger.Debug().Msgf("Executing command in container %s: %s", shortID(containerID), cmd)
 
 	execConfig := container.ExecOptions{
 		Cmd:          []string{"sh", "-c", cmd},
@@ -478,7 +478,7 @@ func (c *Client) RecreateContainer(ctx context.Context, id string, newImage stri
 	resp, err := c.api.ContainerCreate(ctx, newConfig, oldContainer.HostConfig, networkingConfig, nil, containerName)
 	if err != nil {
 		// Rollback: restore old container name and restart it
-		log.Warnf("Rolling back: failed to create new container: %v", err)
+		logger.Warn().Msgf("Rolling back: failed to create new container: %v", err)
 		_ = c.api.ContainerRename(ctx, id, containerName)
 		_ = c.api.ContainerStart(ctx, id, container.StartOptions{})
 		return "", fmt.Errorf("creating new container: %w", err)
@@ -487,7 +487,7 @@ func (c *Client) RecreateContainer(ctx context.Context, id string, newImage stri
 	// Step 5: Start the new container
 	if err := c.api.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
 		// Rollback: remove failed container and restore old one
-		log.Warnf("Rolling back: failed to start new container: %v", err)
+		logger.Warn().Msgf("Rolling back: failed to start new container: %v", err)
 		_ = c.api.ContainerRemove(ctx, resp.ID, container.RemoveOptions{Force: true})
 		_ = c.api.ContainerRename(ctx, id, containerName)
 		_ = c.api.ContainerStart(ctx, id, container.StartOptions{})
@@ -499,10 +499,10 @@ func (c *Client) RecreateContainer(ctx context.Context, id string, newImage stri
 		Force:         true,
 		RemoveVolumes: removeVolumes,
 	}); err != nil {
-		log.Warnf("Failed to remove old container %s: %v", shortID(id), err)
+		logger.Warn().Msgf("Failed to remove old container %s: %v", shortID(id), err)
 	}
 
-	log.Infof("Successfully recreated container %s with new image", containerName)
+	logger.Info().Msgf("Successfully recreated container %s with new image", containerName)
 	return resp.ID, nil
 }
 

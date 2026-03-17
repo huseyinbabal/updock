@@ -38,7 +38,7 @@ import (
 	"strings"
 	"time"
 
-	log "github.com/sirupsen/logrus"
+	"github.com/huseyinbabal/updock/internal/logger"
 )
 
 // Client checks remote registries for image updates.
@@ -75,7 +75,7 @@ func NewClient(configPath string) *Client {
 
 	if configPath != "" {
 		if err := c.loadDockerConfig(configPath); err != nil {
-			log.Debugf("Could not load Docker config from %s: %v", configPath, err)
+			logger.Debug().Msgf("Could not load Docker config from %s: %v", configPath, err)
 		}
 	}
 
@@ -106,7 +106,7 @@ func (c *Client) loadDockerConfig(path string) error {
 			}
 		}
 		c.authConfigs[registry] = auth
-		log.Debugf("Loaded registry credentials for %s", registry)
+		logger.Debug().Msgf("Loaded registry credentials for %s", registry)
 	}
 
 	return nil
@@ -358,7 +358,7 @@ func (c *Client) GetRemoteDigest(ctx context.Context, imageRef string) (string, 
 // getRemoteDigestDirect fetches the digest for a specific host/repo/tag combination.
 // Extracted for testability so httptest servers can pass the host directly.
 func (c *Client) getRemoteDigestDirect(ctx context.Context, host, repo, tag string) (string, error) {
-	log.Debugf("Checking remote digest for %s/%s:%s", host, repo, tag)
+	logger.Debug().Msgf("Checking remote digest for %s/%s:%s", host, repo, tag)
 
 	token, err := c.getToken(ctx, host, repo)
 	if err != nil {
@@ -411,7 +411,7 @@ func (c *Client) hasNewImageDirect(ctx context.Context, host, repo, tag, localDi
 	}
 
 	if remoteDigest != localDigest && !strings.Contains(localDigest, remoteDigest) {
-		log.Infof("New image available for %s/%s:%s: remote=%s local=%s", host, repo, tag, remoteDigest, localDigest)
+		logger.Info().Msgf("New image available for %s/%s:%s: remote=%s local=%s", host, repo, tag, remoteDigest, localDigest)
 		return true, remoteDigest, nil
 	}
 

@@ -35,12 +35,12 @@ import (
 	"github.com/huseyinbabal/updock/internal/audit"
 	"github.com/huseyinbabal/updock/internal/config"
 	"github.com/huseyinbabal/updock/internal/docker"
+	"github.com/huseyinbabal/updock/internal/logger"
 	"github.com/huseyinbabal/updock/internal/notification"
 	"github.com/huseyinbabal/updock/internal/policy"
 	"github.com/huseyinbabal/updock/internal/registry"
 	"github.com/huseyinbabal/updock/internal/scheduler"
 	"github.com/huseyinbabal/updock/internal/updater"
-	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -179,22 +179,15 @@ func run(cmd *cobra.Command, args []string) error {
 	}
 
 	// Configure logging
-	level, err := log.ParseLevel(cfg.LogLevel)
-	if err != nil {
-		level = log.InfoLevel
-	}
-	log.SetLevel(level)
-	log.SetFormatter(&log.TextFormatter{
-		FullTimestamp: true,
-	})
+	logger.Setup(cfg.LogLevel, false)
 
-	log.Infof("Starting Updock %s", config.Version)
+	logger.Info().Msgf("Starting Updock %s", config.Version)
 
 	if cfg.DryRun {
-		log.Warn("Running in dry-run mode - no updates will be applied")
+		logger.Warn().Msg("Running in dry-run mode - no updates will be applied")
 	}
 	if cfg.RunOnce {
-		log.Info("Running in run-once mode - will exit after single check")
+		logger.Info().Msg("Running in run-once mode - will exit after single check")
 	}
 
 	// Create context with signal handling
@@ -215,14 +208,14 @@ func run(cmd *cobra.Command, args []string) error {
 	if err := dockerClient.Ping(ctx); err != nil {
 		return fmt.Errorf("failed to connect to Docker daemon: %w", err)
 	}
-	log.Info("Connected to Docker daemon")
+	logger.Info().Msg("Connected to Docker daemon")
 
 	// Load declarative policy file (updock.yml)
 	spec, err := policy.LoadSpec(cfg.PolicyFile)
 	if err != nil {
 		return fmt.Errorf("failed to load policy file: %w", err)
 	}
-	log.Infof("Loaded policy file: %s (%d policies, %d container overrides, %d groups)",
+	logger.Info().Msgf("Loaded policy file: %s (%d policies, %d container overrides, %d groups)",
 		cfg.PolicyFile, len(spec.Policies), len(spec.Containers), len(spec.Groups))
 
 	// Initialize audit log
@@ -250,7 +243,7 @@ func run(cmd *cobra.Command, args []string) error {
 				updated++
 			}
 		}
-		log.Infof("Run-once complete: %d checked, %d updated", len(results), updated)
+		logger.Info().Msgf("Run-once complete: %d checked, %d updated", len(results), updated)
 		return nil
 	}
 
@@ -266,7 +259,7 @@ func run(cmd *cobra.Command, args []string) error {
 		server := api.NewServer(dockerClient, upd, cfg, spec)
 		go func() {
 			if err := server.Start(); err != nil && err != http.ErrServerClosed {
-				log.Errorf("HTTP server error: %v", err)
+				logger.Error().Msgf("HTTP server error: %v", err)
 			}
 		}()
 		defer func() {
@@ -278,7 +271,7 @@ func run(cmd *cobra.Command, args []string) error {
 
 	// Wait for shutdown signal
 	sig := <-sigCh
-	log.Infof("Received signal %s, shutting down...", sig)
+	logger.Info().Msgf("Received signal %s, shutting down...", sig)
 	cancel()
 
 	return nil

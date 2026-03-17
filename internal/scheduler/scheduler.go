@@ -28,10 +28,10 @@ import (
 	"context"
 	"time"
 
+	"github.com/huseyinbabal/updock/internal/logger"
 	"github.com/huseyinbabal/updock/internal/metrics"
 	"github.com/huseyinbabal/updock/internal/updater"
 	"github.com/robfig/cron/v3"
-	log "github.com/sirupsen/logrus"
 )
 
 // Scheduler manages periodic update check execution.
@@ -66,7 +66,7 @@ func (s *Scheduler) Start(ctx context.Context) error {
 	go func() {
 		metrics.ScansTotal.Inc()
 		if _, err := s.updater.Run(ctx); err != nil {
-			log.Errorf("Initial update check failed: %v", err)
+			logger.Error().Msgf("Initial update check failed: %v", err)
 		}
 	}()
 
@@ -83,14 +83,14 @@ func (s *Scheduler) startCron(ctx context.Context) error {
 	_, err := s.cronJob.AddFunc(s.cronExpr, func() {
 		metrics.ScansTotal.Inc()
 		if _, err := s.updater.Run(ctx); err != nil {
-			log.Errorf("Scheduled update check failed: %v", err)
+			logger.Error().Msgf("Scheduled update check failed: %v", err)
 		}
 	})
 	if err != nil {
 		return err
 	}
 
-	log.Infof("Scheduler started with cron expression: %s", s.cronExpr)
+	logger.Info().Msgf("Scheduler started with cron expression: %s", s.cronExpr)
 	s.cronJob.Start()
 
 	// Listen for shutdown signals
@@ -108,7 +108,7 @@ func (s *Scheduler) startCron(ctx context.Context) error {
 
 // startInterval initializes and starts an interval-based scheduler.
 func (s *Scheduler) startInterval(ctx context.Context) error {
-	log.Infof("Scheduler started with interval: %s", s.interval)
+	logger.Info().Msgf("Scheduler started with interval: %s", s.interval)
 
 	go func() {
 		ticker := time.NewTicker(s.interval)
@@ -119,7 +119,7 @@ func (s *Scheduler) startInterval(ctx context.Context) error {
 			case <-ticker.C:
 				metrics.ScansTotal.Inc()
 				if _, err := s.updater.Run(ctx); err != nil {
-					log.Errorf("Scheduled update check failed: %v", err)
+					logger.Error().Msgf("Scheduled update check failed: %v", err)
 				}
 			case <-ctx.Done():
 				return

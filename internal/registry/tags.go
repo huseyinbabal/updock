@@ -7,7 +7,7 @@ import (
 	"io"
 	"net/http"
 
-	log "github.com/sirupsen/logrus"
+	"github.com/huseyinbabal/updock/internal/logger"
 )
 
 // tagsResponse represents the Docker Registry V2 tags/list response.
@@ -30,7 +30,7 @@ func (c *Client) ListTags(ctx context.Context, imageRef string) ([]string, error
 
 // listTagsDirect lists tags for a specific host/repo. Extracted for testability.
 func (c *Client) listTagsDirect(ctx context.Context, host, repo string) ([]string, error) {
-	log.Debugf("Listing tags for %s/%s", host, repo)
+	logger.Debug().Msgf("Listing tags for %s/%s", host, repo)
 
 	token, err := c.getToken(ctx, host, repo)
 	if err != nil {

@@ -36,7 +36,7 @@ import (
 	"text/template"
 	"time"
 
-	log "github.com/sirupsen/logrus"
+	"github.com/huseyinbabal/updock/internal/logger"
 )
 
 // UpdateEvent is the JSON payload sent to webhook endpoints.
@@ -85,7 +85,7 @@ func NewNotifier(webhookURL string, additionalURLs []string, tmplStr string) *No
 
 	tmpl, err := template.New("notification").Parse(tmplStr)
 	if err != nil {
-		log.Warnf("Invalid notification template, using default: %v", err)
+		logger.Warn().Msgf("Invalid notification template, using default: %v", err)
 		tmpl, _ = template.New("notification").Parse(defaultTmpl)
 	}
 
@@ -108,7 +108,7 @@ func (n *Notifier) NotifyUpdate(result interface{}) {
 
 	data, err := json.Marshal(result)
 	if err != nil {
-		log.Warnf("Failed to marshal update result for notification: %v", err)
+		logger.Warn().Msgf("Failed to marshal update result for notification: %v", err)
 		return
 	}
 
@@ -169,7 +169,7 @@ func (n *Notifier) send(url string, data []byte) {
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(data))
 	if err != nil {
-		log.Warnf("Failed to create webhook request to %s: %v", url, err)
+		logger.Warn().Msgf("Failed to create webhook request to %s: %v", url, err)
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
@@ -177,17 +177,17 @@ func (n *Notifier) send(url string, data []byte) {
 
 	resp, err := n.httpClient.Do(req)
 	if err != nil {
-		log.Warnf("Failed to send webhook notification to %s: %v", url, err)
+		logger.Warn().Msgf("Failed to send webhook notification to %s: %v", url, err)
 		return
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 400 {
-		log.Warnf("Webhook %s returned error status: %d", url, resp.StatusCode)
+		logger.Warn().Msgf("Webhook %s returned error status: %d", url, resp.StatusCode)
 		return
 	}
 
-	log.Debugf("Webhook notification sent to %s", url)
+	logger.Debug().Msgf("Webhook notification sent to %s", url)
 }
 
 // FormatUpdateMessage creates a human-readable update message.
