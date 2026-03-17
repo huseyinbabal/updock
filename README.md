@@ -2,8 +2,6 @@
   <img src="internal/api/assets/updock-logo.png" alt="Updock" width="160">
 </p>
 
-<h1 align="center">Updock</h1>
-
 <p align="center">
   <a href="https://github.com/huseyinbabal/updock/actions/workflows/ci.yml"><img src="https://raw.githubusercontent.com/huseyinbabal/updock/badges/.badges/main/coverage.svg" alt="coverage"></a>
 </p>
