@@ -1113,3 +1113,174 @@ func TestRun_MaintenanceWindowBlock(t *testing.T) {
 	assert.True(t, results[0].Skipped)
 	assert.Contains(t, results[0].Error, "maintenance window")
 }
+
+func TestRun_PatchStrategy_SemverUpgrade(t *testing.T) {
+	mockDocker := mocks.NewMockDockerClient(t)
+	mockRegistry := mocks.NewMockRegistryClient(t)
+	cfg := &config.Config{MonitorAll: true}
+	spec := &policy.Spec{
+		Policies:   map[string]policy.PolicyDef{"default": {Strategy: "patch", Approve: "auto"}},
+		Containers: map[string]policy.ContainerDef{},
+		Groups:     map[string]policy.GroupDef{},
+	}
+	u := New(mockDocker, mockRegistry, nil, cfg, spec, audit.NewLog(""))
+
+	mockDocker.EXPECT().ListContainers(mock.Anything, false, false).Return([]docker.ContainerInfo{
+		{ID: "aaaaaaaaaaaa", Name: "db", Image: "mysql:8.0.44", ImageID: "sha256:old", State: "running", Labels: map[string]string{}},
+	}, nil)
+	mockRegistry.EXPECT().ListTags(mock.Anything, "mysql:8.0.44").Return([]string{"8.0.43", "8.0.44", "8.0.45", "8.1.0", "latest"}, nil)
+	mockRegistry.EXPECT().GetRegistryAuth("mysql:8.0.45").Return("")
+	mockDocker.EXPECT().PullImage(mock.Anything, "mysql:8.0.45", "").Return("sha256:newimg", nil)
+	mockDocker.EXPECT().RecreateContainer(mock.Anything, "aaaaaaaaaaaa", "mysql:8.0.45", mock.Anything, "", false).Return("newctr123456", nil)
+
+	results, err := u.Run(context.Background())
+	assert.NoError(t, err)
+	assert.Len(t, results, 1)
+	assert.True(t, results[0].Updated)
+}
+
+func TestRun_MinorStrategy_SemverUpgrade(t *testing.T) {
+	mockDocker := mocks.NewMockDockerClient(t)
+	mockRegistry := mocks.NewMockRegistryClient(t)
+	cfg := &config.Config{MonitorAll: true}
+	spec := &policy.Spec{
+		Policies:   map[string]policy.PolicyDef{"default": {Strategy: "minor", Approve: "auto"}},
+		Containers: map[string]policy.ContainerDef{},
+		Groups:     map[string]policy.GroupDef{},
+	}
+	u := New(mockDocker, mockRegistry, nil, cfg, spec, audit.NewLog(""))
+
+	mockDocker.EXPECT().ListContainers(mock.Anything, false, false).Return([]docker.ContainerInfo{
+		{ID: "aaaaaaaaaaaa", Name: "web", Image: "nginx:1.24.0", ImageID: "sha256:old", State: "running", Labels: map[string]string{}},
+	}, nil)
+	mockRegistry.EXPECT().ListTags(mock.Anything, "nginx:1.24.0").Return([]string{"1.24.0", "1.24.1", "1.25.0", "1.26.0", "2.0.0"}, nil)
+	mockRegistry.EXPECT().GetRegistryAuth("nginx:1.26.0").Return("")
+	mockDocker.EXPECT().PullImage(mock.Anything, "nginx:1.26.0", "").Return("sha256:newimg", nil)
+	mockDocker.EXPECT().RecreateContainer(mock.Anything, "aaaaaaaaaaaa", "nginx:1.26.0", mock.Anything, "", false).Return("newctr123456", nil)
+
+	results, err := u.Run(context.Background())
+	assert.NoError(t, err)
+	assert.Len(t, results, 1)
+	assert.True(t, results[0].Updated)
+}
+
+func TestRun_PatchStrategy_FallbackDigest_NoUpdate(t *testing.T) {
+	mockDocker := mocks.NewMockDockerClient(t)
+	mockRegistry := mocks.NewMockRegistryClient(t)
+	cfg := &config.Config{MonitorAll: true}
+	spec := &policy.Spec{
+		Policies:   map[string]policy.PolicyDef{"default": {Strategy: "patch", Approve: "auto"}},
+		Containers: map[string]policy.ContainerDef{},
+		Groups:     map[string]policy.GroupDef{},
+	}
+	u := New(mockDocker, mockRegistry, nil, cfg, spec, audit.NewLog(""))
+
+	mockDocker.EXPECT().ListContainers(mock.Anything, false, false).Return([]docker.ContainerInfo{
+		{ID: "aaaaaaaaaaaa", Name: "db", Image: "mysql:8.0.45", ImageID: "sha256:old", State: "running", Labels: map[string]string{}},
+	}, nil)
+	mockRegistry.EXPECT().ListTags(mock.Anything, "mysql:8.0.45").Return([]string{"8.0.44", "8.0.45"}, nil)
+	mockDocker.EXPECT().GetImageDigest(mock.Anything, "sha256:old").Return("sha256:same", nil)
+	mockRegistry.EXPECT().HasNewImage(mock.Anything, "mysql:8.0.45", "sha256:same").Return(false, "sha256:same", nil)
+
+	results, err := u.Run(context.Background())
+	assert.NoError(t, err)
+	assert.Len(t, results, 1)
+	assert.False(t, results[0].Updated)
+}
+
+func TestRun_PatchStrategy_ListTagsError_FallbackDigest(t *testing.T) {
+	mockDocker := mocks.NewMockDockerClient(t)
+	mockRegistry := mocks.NewMockRegistryClient(t)
+	cfg := &config.Config{MonitorAll: true}
+	spec := &policy.Spec{
+		Policies:   map[string]policy.PolicyDef{"default": {Strategy: "patch", Approve: "auto"}},
+		Containers: map[string]policy.ContainerDef{},
+		Groups:     map[string]policy.GroupDef{},
+	}
+	u := New(mockDocker, mockRegistry, nil, cfg, spec, audit.NewLog(""))
+
+	mockDocker.EXPECT().ListContainers(mock.Anything, false, false).Return([]docker.ContainerInfo{
+		{ID: "aaaaaaaaaaaa", Name: "db", Image: "mysql:8.0.45", ImageID: "sha256:old", State: "running", Labels: map[string]string{}},
+	}, nil)
+	mockRegistry.EXPECT().ListTags(mock.Anything, "mysql:8.0.45").Return(nil, errors.New("timeout"))
+	mockDocker.EXPECT().GetImageDigest(mock.Anything, "sha256:old").Return("sha256:old", nil)
+	mockRegistry.EXPECT().HasNewImage(mock.Anything, "mysql:8.0.45", "sha256:old").Return(false, "sha256:old", nil)
+
+	results, err := u.Run(context.Background())
+	assert.NoError(t, err)
+	assert.Len(t, results, 1)
+	assert.False(t, results[0].Updated)
+}
+
+func TestRun_DigestStrategy_HasNewImage_Update(t *testing.T) {
+	mockDocker := mocks.NewMockDockerClient(t)
+	mockRegistry := mocks.NewMockRegistryClient(t)
+	cfg := &config.Config{MonitorAll: true}
+	spec := &policy.Spec{
+		Policies:   map[string]policy.PolicyDef{"default": {Strategy: "all", Approve: "auto"}},
+		Containers: map[string]policy.ContainerDef{},
+		Groups:     map[string]policy.GroupDef{},
+	}
+	u := New(mockDocker, mockRegistry, nil, cfg, spec, audit.NewLog(""))
+
+	mockDocker.EXPECT().ListContainers(mock.Anything, false, false).Return([]docker.ContainerInfo{
+		{ID: "aaaaaaaaaaaa", Name: "app", Image: "myapp:latest", ImageID: "sha256:old", State: "running", Labels: map[string]string{}},
+	}, nil)
+	mockDocker.EXPECT().GetImageDigest(mock.Anything, "sha256:old").Return("sha256:olddigest", nil)
+	mockRegistry.EXPECT().HasNewImage(mock.Anything, "myapp:latest", "sha256:olddigest").Return(true, "sha256:newdigest", nil)
+	mockRegistry.EXPECT().GetRegistryAuth("myapp:latest").Return("")
+	mockDocker.EXPECT().PullImage(mock.Anything, "myapp:latest", "").Return("sha256:newimg", nil)
+	mockDocker.EXPECT().RecreateContainer(mock.Anything, "aaaaaaaaaaaa", "myapp:latest", mock.Anything, "", false).Return("newctr123456", nil)
+
+	results, err := u.Run(context.Background())
+	assert.NoError(t, err)
+	assert.Len(t, results, 1)
+	assert.True(t, results[0].Updated)
+}
+
+func TestRun_DigestStrategy_GetDigestError(t *testing.T) {
+	mockDocker := mocks.NewMockDockerClient(t)
+	mockRegistry := mocks.NewMockRegistryClient(t)
+	cfg := &config.Config{MonitorAll: true}
+	spec := &policy.Spec{
+		Policies:   map[string]policy.PolicyDef{"default": {Strategy: "all", Approve: "auto"}},
+		Containers: map[string]policy.ContainerDef{},
+		Groups:     map[string]policy.GroupDef{},
+	}
+	u := New(mockDocker, mockRegistry, nil, cfg, spec, audit.NewLog(""))
+
+	mockDocker.EXPECT().ListContainers(mock.Anything, false, false).Return([]docker.ContainerInfo{
+		{ID: "aaaaaaaaaaaa", Name: "app", Image: "myapp:latest", ImageID: "sha256:old", State: "running", Labels: map[string]string{}},
+	}, nil)
+	mockDocker.EXPECT().GetImageDigest(mock.Anything, "sha256:old").Return("", errors.New("inspect failed"))
+
+	results, err := u.Run(context.Background())
+	assert.NoError(t, err)
+	assert.Len(t, results, 1)
+	assert.Contains(t, results[0].Error, "getting local digest")
+}
+
+func TestFindNewerTag_WithMock_Success(t *testing.T) {
+	mockRegistry := mocks.NewMockRegistryClient(t)
+	u := New(nil, mockRegistry, nil, &config.Config{}, policy.DefaultSpec(), audit.NewLog(""))
+
+	mockRegistry.EXPECT().ListTags(mock.Anything, "mysql:8.0.44").Return(
+		[]string{"8.0.43", "8.0.44", "8.0.45", "8.0.46", "latest"}, nil)
+
+	newRef, found, err := u.findNewerTag(context.Background(), "mysql:8.0.44", "patch")
+	assert.NoError(t, err)
+	assert.True(t, found)
+	assert.Equal(t, "mysql:8.0.46", newRef)
+}
+
+func TestFindNewerTag_WithMock_NoNewer(t *testing.T) {
+	mockRegistry := mocks.NewMockRegistryClient(t)
+	u := New(nil, mockRegistry, nil, &config.Config{}, policy.DefaultSpec(), audit.NewLog(""))
+
+	mockRegistry.EXPECT().ListTags(mock.Anything, "mysql:8.0.45").Return(
+		[]string{"8.0.44", "8.0.45"}, nil)
+
+	_, found, err := u.findNewerTag(context.Background(), "mysql:8.0.45", "patch")
+	assert.NoError(t, err)
+	assert.False(t, found)
+}

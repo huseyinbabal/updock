@@ -314,13 +314,14 @@ func (u *Updater) checkAndUpdate(ctx context.Context, ctr docker.ContainerInfo) 
 		// Try semver-based tag discovery for patch/minor/major strategies
 		if strategyStr == "patch" || strategyStr == "minor" || strategyStr == "major" {
 			newTag, found, err := u.findNewerTag(ctx, ctr.Image, strategyStr)
-			if err != nil {
-				logger.Debug().Msgf("Semver tag discovery failed for %s, falling back to digest check: %v", ctr.Name, err)
-			} else if found {
+			if err == nil && found {
 				newImageRef = newTag
 				logger.Info().Msgf("Semver upgrade found for %s: %s -> %s", ctr.Name, ctr.Image, newTag)
 			} else {
-				// No newer semver tag found; also check digest for same tag
+				// Semver discovery failed or no newer tag found; fall back to digest check
+				if err != nil {
+					logger.Debug().Msgf("Semver tag discovery failed for %s, falling back to digest check: %v", ctr.Name, err)
+				}
 				localDigest, err := u.docker.GetImageDigest(ctx, ctr.ImageID)
 				if err != nil {
 					result.Error = fmt.Sprintf("getting local digest: %v", err)
